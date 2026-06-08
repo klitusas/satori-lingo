@@ -1,1951 +1,1271 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  BookOpen, 
-  Layers, 
-  Sparkles, 
-  Trash2, 
-  Plus, 
-  Search, 
-  CheckCircle, 
-  AlertTriangle, 
-  X, 
-  Edit3, 
-  RefreshCw, 
-  Info, 
-  ArrowRight,
-  Database,
-  HelpCircle,
-  Sliders,
-  Check,
-  Brain,
-  Image as ImageIcon,
-  Wand2,
-  Key,
-  Flame,
-  Globe,
-  Compass,
-  ArrowDownToLine,
-  Loader2
-} from 'lucide-react';
-
-interface Flashcard {
-  id: string;
-  spanish: string;
-  english: string;
-  context: string | null;
-  box: number; // 1 to 5
-  nextReview: number; // Timestamp ms
-  aiImage?: string; // base64 encoded image string
-  aiExplanation?: {
-    literalMeaning: string;
-    culturalNuance: string;
-    examples: { spanish: string; english: string; }[];
-  };
-}
-
-interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'error' | 'info';
-}
-
-interface ConfirmModalState {
-  isOpen: boolean;
-  title: string;
-  message: string;
-  onConfirm: () => void;
-}
-
-const BOX_INTERVALS = [
-  0,                     // Box 1: Immediate (0 ms)
-  24 * 60 * 60 * 1000,   // Box 2: 24 hours
-  3 * 24 * 60 * 60 * 1000,  // Box 3: 3 days
-  7 * 24 * 60 * 60 * 1000,  // Box 4: 7 days
-  14 * 24 * 60 * 60 * 1000  // Box 5: 14 days
-];
-
-const LOCAL_STORAGE_KEY = 'satori_lingo_flashcards_v2';
-const API_KEY_STORAGE_KEY = 'satori_lingo_gemini_key';
-
-// Beautiful Japandi Seed Data
-const SEED_PHRASES = [
-  { spanish: "Estar como una cabra", english: "To be completely crazy", context: "Idiom, literally: To be like a goat" },
-  { spanish: "Tomar el pelo", english: "To pull someone's leg", context: "Idiom, literally: To take/pull the hair" },
-  { spanish: "Meter la pata", english: "To put one's foot in it", context: "Idiom, literally: To put the leg in" },
-  { spanish: "Costar un ojo de la cara", english: "To cost an arm and a leg", context: "Idiom, literally: To cost an eye of the face" },
-  { spanish: "Estar en las nubes", english: "To be daydreaming", context: "Idiom, literally: To be in the clouds" },
-  { spanish: "No tener pelos en la lengua", english: "To speak one's mind", context: "Idiom, literally: To not have hairs on the tongue" },
-  { spanish: "Echar de menos", english: "To miss someone or something", context: "Verb phrase" },
-  { spanish: "Dar en el clavo", english: "To hit the nail on the head", context: "Idiom" },
-  { spanish: "Ponerse las pilas", english: "To get one's act together", context: "Idiom, literally: To put in one's batteries" },
-  { spanish: "Quedarse de piedra", english: "To be stunned or shocked", context: "Idiom, literally: To stay like stone" }
-];
-
-function parseKeepText(text: string): Omit<Flashcard, 'id' | 'box' | 'nextReview'>[] {
-  const lines = text.split('\n');
-  const results: Omit<Flashcard, 'id' | 'box' | 'nextReview'>[] = [];
-
-  for (let line of lines) {
-    let cleaned = line.trim();
-    if (!cleaned) continue;
-
-    // Remove Keep checklist prefix like [] or [ ]
-    cleaned = cleaned.replace(/^([*\-\s]*\[\s*\]\s*)/i, '');
-    cleaned = cleaned.trim();
-
-    // Extract context inside square brackets [...] if present
-    let context: string | null = null;
-    const bracketRegex = /\[([^\]]+)\]/;
-    const bracketMatch = cleaned.match(bracketRegex);
-    if (bracketMatch) {
-      context = bracketMatch[1].trim();
-      cleaned = cleaned.replace(bracketRegex, '').trim();
-    }
-
-    // Split based on dash variants (-, en-dash –, em-dash —)
-    const dashRegex = /\s+[\-\u2013\u2014]\s+/;
-    let parts = cleaned.split(dashRegex);
-
-    if (parts.length < 2) {
-      parts = cleaned.split(/[\-\u2013\u2014]/);
-    }
-
-    if (parts.length >= 2) {
-      const spanish = parts[0].trim();
-      const english = parts.slice(1).join('-').trim();
-
-      if (spanish && english) {
-        results.push({ spanish, english, context });
-      }
-    }
-  }
-  return results;
-}
-
-const getRelativeTimeString = (timestamp: number): string => {
-  const diff = timestamp - Date.now();
-  if (diff <= 0) return 'Due Now';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Satori Lingo — Spaced Repetition Workspace</title>
   
-  const mins = Math.ceil(diff / 60000);
-  if (mins < 60) return `In ${mins}m`;
-  
-  const hours = Math.round(diff / 3600000);
-  if (hours < 24) return `In ${hours}h`;
-  
-  const days = Math.round(diff / 86400000);
-  return `In ${days}d`;
-};
-
-export default function App() {
-  const [cards, setCards] = useState<Flashcard[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [customApiKey, setCustomApiKey] = useState<string>(() => {
-    return localStorage.getItem(API_KEY_STORAGE_KEY) || '';
-  });
-
-  const [activeTab, setActiveTab] = useState<'study' | 'database' | 'ingest'>('study');
-  const [ingestSubTab, setIngestSubTab] = useState<'paste' | 'ai'>('paste');
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [confirmModal, setConfirmModal] = useState<ConfirmModalState>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {}
-  });
-
-  // Bulk Ingestion state
-  const [pasteText, setPasteText] = useState('');
-
-  // AI Phrase Generator state
-  const [aiPromptTopic, setAiPromptTopic] = useState('');
-  const [aiPromptTone, setAiPromptTone] = useState('Idiomatic / Conversational');
-  const [aiPromptLevel, setAiPromptLevel] = useState('Intermedio (B1-B2)');
-  const [isAiGeneratingVocab, setIsAiGeneratingVocab] = useState(false);
-  const [aiGeneratedPreview, setAiGeneratedPreview] = useState<Omit<Flashcard, 'id' | 'box' | 'nextReview'>[]>([]);
-
-  // Manual Input State
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newSpanish, setNewSpanish] = useState('');
-  const [newEnglish, setNewEnglish] = useState('');
-  const [newContext, setNewContext] = useState('');
-
-  // Editing Card State
-  const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
-
-  // Search & Filters for Database
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterBox, setFilterBox] = useState<number | 'all'>('all');
-
-  // Study Session States
-  const [sessionQueue, setSessionQueue] = useState<string[]>([]);
-  const [sessionIndex, setSessionIndex] = useState<number>(0);
-  const [isRevealed, setIsRevealed] = useState(false);
-  const [isCramMode, setIsCramMode] = useState(false);
-
-  // AI Action States
-  const [isExplaining, setIsExplaining] = useState(false);
-  const [isGeneratingMnemonic, setIsGeneratingMnemonic] = useState(false);
-  const [showApiSettings, setShowApiSettings] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cards));
-  }, [cards]);
-
-  useEffect(() => {
-    localStorage.setItem(API_KEY_STORAGE_KEY, customApiKey);
-  }, [customApiKey]);
-
-  const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    const id = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4500);
-  };
-
-  const fetchWithBackoff = async (url: string, options: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
-    try {
-      const response = await fetch(url, options);
-      if (response.status === 429 && retries > 0) {
-        await new Promise(res => setTimeout(res, delay));
-        return fetchWithBackoff(url, options, retries - 1, delay * 2);
-      }
-      return response;
-    } catch (error) {
-      if (retries > 0) {
-        await new Promise(res => setTimeout(res, delay));
-        return fetchWithBackoff(url, options, retries - 1, delay * 2);
-      }
-      throw error;
-    }
-  };
-
-  const dueCards = useMemo(() => {
-    const now = Date.now();
-    return cards.filter(card => card.nextReview <= now)
-                .sort((a, b) => {
-                  if (a.box !== b.box) return a.box - b.box;
-                  return a.nextReview - b.nextReview;
-                });
-  }, [cards]);
-
-  const boxCounts = useMemo(() => {
-    const counts = [0, 0, 0, 0, 0];
-    cards.forEach(card => {
-      const idx = Math.min(Math.max(card.box - 1, 0), 4);
-      counts[idx]++;
-    });
-    return counts;
-  }, [cards]);
-
-  const startSession = (cram: boolean = false) => {
-    setIsCramMode(cram);
-    let queueList: Flashcard[] = [];
-    
-    if (cram) {
-      queueList = [...cards].sort((a, b) => a.box - b.box);
-    } else {
-      queueList = [...dueCards];
-    }
-
-    if (queueList.length === 0) {
-      setSessionQueue([]);
-      return;
-    }
-
-    setSessionQueue(queueList.map(c => c.id));
-    setSessionIndex(0);
-    setIsRevealed(false);
-  };
-
-  useEffect(() => {
-    if (sessionQueue.length === 0 && dueCards.length > 0 && !isCramMode) {
-      startSession(false);
-    }
-  }, [cards, sessionQueue.length, dueCards.length, isCramMode]);
-
-  const activeCard = useMemo(() => {
-    if (sessionQueue.length === 0 || sessionIndex >= sessionQueue.length) return null;
-    const cardId = sessionQueue[sessionIndex];
-    return cards.find(c => c.id === cardId) || null;
-  }, [sessionQueue, sessionIndex, cards]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (activeTab !== 'study' || !activeCard) return;
-      
-      const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-        return;
-      }
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        if (!isRevealed) {
-          setIsRevealed(true);
-        }
-      } else if (e.key === '1') {
-        if (isRevealed) {
-          handleScore(false);
-        }
-      } else if (e.key === '2') {
-        if (isRevealed) {
-          handleScore(true);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, activeCard, isRevealed, sessionQueue, sessionIndex]);
-
-  const handleScore = (gotIt: boolean) => {
-    if (!activeCard) return;
-
-    const updatedCards = cards.map(c => {
-      if (c.id === activeCard.id) {
-        let nextBox = c.box;
-        if (gotIt) {
-          nextBox = Math.min(c.box + 1, 5);
-        } else {
-          nextBox = 1;
-        }
-        
-        const interval = BOX_INTERVALS[nextBox - 1];
-        const nextReview = Date.now() + interval;
-
-        return {
-          ...c,
-          box: nextBox,
-          nextReview
-        };
-      }
-      return c;
-    });
-
-    setCards(updatedCards);
-
-    if (gotIt) {
-      addToast(`Card moved to Box ${Math.min(activeCard.box + 1, 5)}!`, 'success');
-      const newQueue = [...sessionQueue];
-      newQueue.splice(sessionIndex, 1);
-      setSessionQueue(newQueue);
-      
-      if (sessionIndex >= newQueue.length && newQueue.length > 0) {
-        setSessionIndex(0);
-      }
-      setIsRevealed(false);
-    } else {
-      addToast("Reset to Box 1. Card placed at the back of this session.", "error");
-      
-      const newQueue = [...sessionQueue];
-      newQueue.splice(sessionIndex, 1);
-      newQueue.push(activeCard.id);
-      
-      setSessionQueue(newQueue);
-      if (sessionIndex >= newQueue.length && newQueue.length > 0) {
-        setSessionIndex(0);
-      }
-      setIsRevealed(false);
-    }
-  };
-
-  const fetchAISenseiExplanation = async () => {
-    if (!activeCard) return;
-    if (!customApiKey) {
-      addToast("Please configure your Gemini API Key first.", "error");
-      setShowApiSettings(true);
-      return;
-    }
-    setIsExplaining(true);
-
-    try {
-      const apiKey = customApiKey;
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-      const systemPrompt = "Act as Satori Sensei, a beautiful and gentle Japandi-style language scholar. Analyze the provided Spanish phrase and output strict, perfectly compliant JSON matching the requested schema. Ensure translations are nuanced, elegant, and useful for learners.";
-      const userQuery = `Provide structural breakdown and examples for: "${activeCard.spanish}" which is translated as "${activeCard.english}". Note/Context provided: ${activeCard.context || "None"}.`;
-
-      const payload = {
-        contents: [{ parts: [{ text: userQuery }] }],
-        systemInstruction: {
-          parts: [{ text: systemPrompt }]
-        },
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              literalMeaning: { type: "STRING", description: "Literal word-by-word structural breakdown of what is being said" },
-              culturalNuance: { type: "STRING", description: "Why this phrase is used, idiomatic origins, or level of formality explanations." },
-              examples: {
-                type: "ARRAY",
-                items: {
-                  type: "OBJECT",
-                  properties: {
-                    spanish: { type: "STRING", description: "A simple conversational sentence in Spanish containing the phrase" },
-                    english: { type: "STRING", description: "English translation of the example sentence" }
-                  },
-                  required: ["spanish", "english"]
-                }
-              }
-            },
-            required: ["literalMeaning", "culturalNuance", "examples"]
-          }
-        }
-      };
-
-      const res = await fetchWithBackoff(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        throw new Error(`API error: ${res.statusText}`);
-      }
-
-      const data = await res.json();
-      const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      
-      if (textResponse) {
-        const parsedExplanation = JSON.parse(textResponse);
-        
-        const updatedCards = cards.map(c => {
-          if (c.id === activeCard.id) {
-            return {
-              ...c,
-              aiExplanation: parsedExplanation
-            };
-          }
-          return c;
-        });
-        setCards(updatedCards);
-        addToast("Satori Sensei explanation loaded!", "success");
-      }
-    } catch (err: any) {
-      console.error(err);
-      addToast("Failed to fetch explanation. Check connectivity or your API Key.", "error");
-    } finally {
-      setIsExplaining(false);
-    }
-  };
-
-  const fetchAIMnemonicSketch = async () => {
-    if (!activeCard) return;
-    if (!customApiKey) {
-      addToast("Please configure your Gemini API Key first.", "error");
-      setShowApiSettings(true);
-      return;
-    }
-    setIsGeneratingMnemonic(true);
-
-    try {
-      const apiKey = customApiKey;
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
-
-      const imagePrompt = `A simple, ultra-minimalist, elegant Japandi line art sketch on a neutral warm beige background representing: "${activeCard.spanish}" (${activeCard.english}). Stylized, peaceful aesthetic, organic lines, sophisticated design, perfect memory association tool. No text.`;
-
-      const payload = {
-        instances: [{ prompt: imagePrompt }],
-        parameters: { sampleCount: 1 }
-      };
-
-      const res = await fetchWithBackoff(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        throw new Error(`Imagen status error: ${res.statusText}`);
-      }
-
-      const data = await res.json();
-      const base64Encoded = data.predictions?.[0]?.bytesBase64Encoded;
-
-      if (base64Encoded) {
-        const imageUrl = `data:image/png;base64,${base64Encoded}`;
-        
-        const updatedCards = cards.map(c => {
-          if (c.id === activeCard.id) {
-            return {
-              ...c,
-              aiImage: imageUrl
-            };
-          }
-          return c;
-        });
-        setCards(updatedCards);
-        addToast("Visual memory sketch illustrated!", "success");
-      } else {
-        throw new Error("No image data returned from Gemini");
-      }
-
-    } catch (err: any) {
-      console.error(err);
-      addToast("Failed to illustrate mnemonic sketch. Check your API Key.", "error");
-    } finally {
-      setIsGeneratingMnemonic(false);
-    }
-  };
-
-  const generateAITopicVocabulary = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!aiPromptTopic.trim()) {
-      addToast("Please state a topic or situation first.", "error");
-      return;
-    }
-    if (!customApiKey) {
-      addToast("Please configure your Gemini API Key first.", "error");
-      setShowApiSettings(true);
-      return;
-    }
-
-    setIsAiGeneratingVocab(true);
-    setAiGeneratedPreview([]);
-
-    try {
-      const apiKey = customApiKey;
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-      const systemPrompt = "Act as Satori Scholar, a world-class Spanish language curator. Build a high-yield collection of 5 authentic conversational cards on any user scenario. Include bracketed literals or situations in brackets for contexts.";
-      const queryPrompt = `Generate a set of exactly 5 premium language flashcards for a student. Topic / Scenario: "${aiPromptTopic}". Requested Tone/Register: "${aiPromptTone}". Target Fluency Level: "${aiPromptLevel}". Ensure translations are accurate, elegant, and useful for daily life in Spain or Latin America.`;
-
-      const payload = {
-        contents: [{ parts: [{ text: queryPrompt }] }],
-        systemInstruction: {
-          parts: [{ text: systemPrompt }]
-        },
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                spanish: { type: "STRING", description: "The authentic Spanish phrase" },
-                english: { type: "STRING", description: "The natural English translation" },
-                context: { type: "STRING", description: "Brackets explanation: e.g. 'Idiom, lit: like a box' or 'Colloquial situational'" }
-              },
-              required: ["spanish", "english", "context"]
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            japandi: {
+              cream: '#FAF9F6',
+              paper: '#F5F3EF',
+              border: '#E3DFD5',
+              charcoal: '#2D2D2D',
+              olive: '#4F5D4E',
+              oliveHover: '#3D493D',
+              terracotta: '#C28C7E',
+              muted: '#7A756B'
             }
           }
         }
-      };
-
-      const res = await fetchWithBackoff(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        throw new Error(`API error: ${res.statusText}`);
       }
-
-      const data = await res.json();
-      const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (textResponse) {
-        const parsedList = JSON.parse(textResponse);
-        setAiGeneratedPreview(parsedList);
-        addToast("Preview cards crafted successfully!", "success");
-      }
-    } catch (err: any) {
-      console.error(err);
-      addToast("AI generation failed. Check details or your API setup.", "error");
-    } finally {
-      setIsAiGeneratingVocab(false);
     }
-  };
+  </script>
 
-  const importAIGeneratedCards = () => {
-    if (aiGeneratedPreview.length === 0) return;
+  <!-- React & ReactDOM (Production) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel Compiler for In-Browser JSX/TSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    let addedCount = 0;
-    let duplicateCount = 0;
-    const currentCards = [...cards];
+  <!-- Elegant Serif Font Header -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..700;1,400..700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    aiGeneratedPreview.forEach(item => {
-      const exists = currentCards.some(
-        c => c.spanish.toLowerCase() === item.spanish.toLowerCase()
-      );
-
-      if (!exists) {
-        const newCard: Flashcard = {
-          id: (Date.now() + addedCount).toString() + Math.random().toString(36).substr(2, 5),
-          spanish: item.spanish,
-          english: item.english,
-          context: item.context,
-          box: 1,
-          nextReview: Date.now()
-        };
-        currentCards.push(newCard);
-        addedCount++;
-      } else {
-        duplicateCount++;
-      }
-    });
-
-    setCards(currentCards);
-    setAiGeneratedPreview([]);
-    setAiPromptTopic('');
-
-    if (addedCount > 0) {
-      addToast(`Imported ${addedCount} custom AI generated phrases!`, "success");
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
     }
-    if (duplicateCount > 0) {
-      addToast(`Filtered out ${duplicateCount} duplicate phrases.`, "info");
+    h1, h2, h3, .serif-font {
+      font-family: 'Playfair Display', serif;
     }
-  };
-
-  const handleAddCard = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSpanish.trim() || !newEnglish.trim()) {
-      addToast("Please fill in both Spanish and English phrases.", "error");
-      return;
+    /* Hide scrollbar for clean aesthetic */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
     }
-
-    const cleanSpanish = newSpanish.trim();
-    const isDuplicate = cards.some(c => c.spanish.toLowerCase() === cleanSpanish.toLowerCase());
-
-    if (isDuplicate) {
-      addToast(`"${cleanSpanish}" is already in your database!`, "error");
-      return;
+    ::-webkit-scrollbar-track {
+      background: #F5F3EF;
     }
+    ::-webkit-scrollbar-thumb {
+      background: #C28C7E;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-japandi-cream text-japandi-charcoal min-h-screen">
 
-    const newCard: Flashcard = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-      spanish: cleanSpanish,
-      english: newEnglish.trim(),
-      context: newContext.trim() || null,
-      box: 1,
-      nextReview: Date.now()
+  <div id="root"></div>
+
+  <!-- React Application Source Code -->
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // Default Starting Vocabulary to populate on first run
+    const INITIAL_VOCABULARY = [
+      { id: '1', spanish: 'tuve una idea', english: 'I came up with an idea', context: 'Used with preterite past tense', box: 1, nextReview: Date.now() },
+      { id: '2', spanish: 'Lo que resulta en que', english: 'which results in', context: 'Connector phrase for formal explanations', box: 2, nextReview: Date.now() - 5000 },
+      { id: '3', spanish: '¿Cómo se come esto?', english: 'How does that work?', context: 'Idiomatic expression. Lit: How is this eaten?', box: 3, nextReview: Date.now() - 10000 },
+      { id: '4', spanish: 'Desde luego', english: 'of course', context: 'Emphatic agreement', box: 4, nextReview: Date.now() - 20000 },
+      { id: '5', spanish: 'Tomar el pelo', english: 'to pull someone’s leg', context: 'Lit: to take the hair', box: 5, nextReview: Date.now() + 86400000 }
+    ];
+
+    // Leitner Spaced Repetition Box Intervals (in milliseconds)
+    const BOX_INTERVALS = {
+      1: 0,                   // Immediate (0 ms)
+      2: 24 * 60 * 60 * 1000, // 24 Hours
+      3: 3 * 24 * 60 * 60 * 1000,  // 3 Days
+      4: 7 * 24 * 60 * 60 * 1000,  // 7 Days
+      5: 14 * 24 * 60 * 60 * 1000  // 14 Days
     };
 
-    setCards(prev => [newCard, ...prev]);
-    setNewSpanish('');
-    setNewEnglish('');
-    setNewContext('');
-    setShowAddForm(false);
-    addToast("Phrase added successfully!", "success");
-  };
+    function App() {
+      // --- Persistent App States ---
+      const [flashcards, setFlashcards] = useState(() => {
+        const local = localStorage.getItem('satori_lingo_cards');
+        return local ? JSON.parse(local) : INITIAL_VOCABULARY;
+      });
 
-  const handleBulkLoad = () => {
-    if (!pasteText.trim()) {
-      addToast("Nothing to parse. Please paste text lines.", "error");
-      return;
-    }
+      const [apiKey, setApiKey] = useState(() => {
+        return localStorage.getItem('satori_lingo_apikey') || '';
+      });
 
-    const parsed = parseKeepText(pasteText);
-    if (parsed.length === 0) {
-      addToast("Unable to extract flashcards. Check dash separators.", "error");
-      return;
-    }
+      // --- Workspace Navigation ---
+      const [activeTab, setActiveTab] = useState('study'); // 'study' | 'database' | 'ingest' | 'settings'
 
-    let addedCount = 0;
-    let duplicateCount = 0;
-    const currentCards = [...cards];
+      // --- Study Deck States ---
+      const [sessionCards, setSessionCards] = useState([]);
+      const [currentIndex, setCurrentIndex] = useState(0);
+      const [isRevealed, setIsRevealed] = useState(false);
 
-    parsed.forEach(item => {
-      const exists = currentCards.some(
-        c => c.spanish.toLowerCase() === item.spanish.toLowerCase()
-      );
+      // --- Bulk Ingestion Form States ---
+      const [bulkInput, setBulkInput] = useState('');
+      const [customTopic, setCustomTopic] = useState('');
+      const [aiGeneratingTopic, setAiGeneratingTopic] = useState(false);
 
-      if (!exists) {
-        const newCard: Flashcard = {
-          id: (Date.now() + addedCount).toString() + Math.random().toString(36).substr(2, 5),
-          spanish: item.spanish,
-          english: item.english,
-          context: item.context,
+      // --- Manual Add Form States ---
+      const [manualSpanish, setManualSpanish] = useState('');
+      const [manualEnglish, setManualEnglish] = useState('');
+      const [manualContext, setManualContext] = useState('');
+
+      // --- Card Search & Filters ---
+      const [searchQuery, setSearchQuery] = useState('');
+      const [filterBox, setFilterBox] = useState('all'); // 'all' | '1' | '2' | '3' | '4' | '5'
+      const [editingCardId, setEditingCardId] = useState(null);
+      const [editSpanish, setEditSpanish] = useState('');
+      const [editEnglish, setEditEnglish] = useState('');
+      const [editContext, setEditContext] = useState('');
+
+      // --- AI Coprocessor Cache / Transient States ---
+      const [aiSenseiLoading, setAiSenseiLoading] = useState(false);
+      const [aiSenseiContent, setAiSenseiContent] = useState(null);
+      const [aiMnemonicLoading, setAiMnemonicLoading] = useState(false);
+
+      // --- Custom Notifications / Dialog Overlays ---
+      const [toast, setToast] = useState(null); // { message: string, type: 'success' | 'info' | 'error' }
+      const [customConfirm, setCustomConfirm] = useState(null); // { title: string, message: string, onConfirm: () => void }
+
+      // --- Synchronize with LocalStorage ---
+      useEffect(() => {
+        localStorage.setItem('satori_lingo_cards', JSON.stringify(flashcards));
+      }, [flashcards]);
+
+      useEffect(() => {
+        localStorage.setItem('satori_lingo_apikey', apiKey);
+      }, [apiKey]);
+
+      // --- Show Custom Toast Function ---
+      const triggerToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 4000);
+      };
+
+      // --- Spaced Repetition Engine Calculations ---
+      const dueCards = useMemo(() => {
+        const now = Date.now();
+        return flashcards
+          .filter(card => card.nextReview <= now)
+          .sort((a, b) => a.box - b.box); // Priority to lowest Box
+      }, [flashcards]);
+
+      const boxStats = useMemo(() => {
+        const stats = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        flashcards.forEach(card => {
+          if (stats[card.box] !== undefined) stats[card.box]++;
+        });
+        return stats;
+      }, [flashcards]);
+
+      // --- Initialize Study Session ---
+      const startStudySession = () => {
+        if (dueCards.length > 0) {
+          // Clone due cards into active temporary study loop state
+          setSessionCards([...dueCards]);
+          setCurrentIndex(0);
+          setIsRevealed(false);
+          setAiSenseiContent(null);
+        } else {
+          setSessionCards([]);
+        }
+      };
+
+      // Autoload study deck on load or transition
+      useEffect(() => {
+        if (activeTab === 'study') {
+          startStudySession();
+        }
+      }, [activeTab, flashcards]);
+
+      // --- API Helper with Exponential Backoff ---
+      const callGeminiAPI = async (endpoint, payload, retries = 5, delay = 1000) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${endpoint}?key=${apiKey}`;
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            throw new Error(`Google API returned status ${response.status}`);
+          }
+          return await response.json();
+        } catch (error) {
+          if (retries > 0) {
+            await new Promise(res => setTimeout(res, delay));
+            return callGeminiAPI(endpoint, payload, retries - 1, delay * 2);
+          }
+          throw error;
+        }
+      };
+
+      // --- AI Sensei Explainer (Text Generation) ---
+      const handleAskAiSensei = async (card) => {
+        if (!apiKey) {
+          triggerToast("Please add your Google AI Studio API key in settings to use AI features.", "error");
+          return;
+        }
+        setAiSenseiLoading(true);
+        setAiSenseiContent(null);
+
+        const promptText = `Act as an expert bilingual Spanish language coach. Break down the phrase: "${card.spanish}" (meaning: "${card.english}"). 
+        Provide:
+        1. A literal translation breakdown.
+        2. Important grammatical nuances or verbs used.
+        3. Real-world context, situational cues, or regional slang details.
+        Make it brief, educational, beautifully formatted in clean, professional markdown, and encouraging. Do NOT mention speech or audio details.`;
+
+        const payload = {
+          contents: [{ parts: [{ text: promptText }] }]
+        };
+
+        try {
+          const data = await callGeminiAPI('gemini-2.5-flash-preview-09-2025:generateContent', payload);
+          const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (responseText) {
+            setAiSenseiContent(responseText);
+            // Cache the explanation directly into the card in the database for instant future recall
+            setFlashcards(prev => prev.map(c => c.id === card.id ? { ...c, aiSenseiCached: responseText } : c));
+            triggerToast("AI Sensei explanation loaded and cached!", "success");
+          } else {
+            throw new Error("Empty response received from API");
+          }
+        } catch (err) {
+          console.error(err);
+          triggerToast("Failed to fetch AI Sensei context. Check network or API key.", "error");
+        } finally {
+          setAiSenseiLoading(false);
+        }
+      };
+
+      // --- AI Mnemonic Sketcher (Image Generation using Imagen 4.0) ---
+      const handleSketchMnemonic = async (card) => {
+        if (!apiKey) {
+          triggerToast("Please add your Google AI Studio API key in settings to use AI features.", "error");
+          return;
+        }
+        setAiMnemonicLoading(true);
+
+        const promptText = `A minimalist, clean Japandi style design, stamp, or conceptual line sketch representing the language concept: "${card.spanish}" which means "${card.english}". Subtle beige or neutral earth-tone backdrop, premium hand-drawn fine line art style, aesthetic balance, absolute clarity, no letters or words.`;
+
+        const payload = {
+          instances: [{ prompt: promptText }],
+          parameters: { sampleCount: 1 }
+        };
+
+        try {
+          const data = await callGeminiAPI('imagen-4.0-generate-001:predict', payload);
+          const base64Bytes = data.predictions?.[0]?.bytesBase64Encoded;
+          if (base64Bytes) {
+            const imageUrl = `data:image/png;base64,${base64Bytes}`;
+            // Cache base64 image onto the card permanently
+            setFlashcards(prev => prev.map(c => c.id === card.id ? { ...c, aiMnemonicCached: imageUrl } : c));
+            triggerToast("Mnemonic sketch generated successfully!", "success");
+          } else {
+            throw new Error("No image data returned in payload");
+          }
+        } catch (err) {
+          console.error(err);
+          triggerToast("Failed to sketch mnemonic image. Check AI billing, configuration, or key.", "error");
+        } finally {
+          setAiMnemonicLoading(false);
+        }
+      };
+
+      // --- AI Topic-Driven Phrase Builder (Structured JSON Generation) ---
+      const handleGenerateTopicDeck = async () => {
+        if (!apiKey) {
+          triggerToast("Please enter an API Key in settings first.", "error");
+          return;
+        }
+        if (!customTopic.trim()) {
+          triggerToast("Please describe a scenario (e.g. Asking directions in Seville)", "error");
+          return;
+        }
+        setAiGeneratingTopic(true);
+
+        const systemPrompt = "You are a specialized Spanish vocabulary generator that outputs pure, valid JSON arrays for import into a language-learning spaced repetition tool.";
+        const userPrompt = `Generate a highly structured collection of exactly 8 highly-authentic, practical, natural Spanish-English phrases for the scenario: "${customTopic}". 
+        Clean up any checklist brackets. If there are regional specifics, put them inside bracketed context notes.
+        Do not add codeblock styling outside of pure JSON. Use this exact JSON structure:
+        {
+          "cards": [
+            {
+              "spanish": "Spanish target phrase",
+              "english": "Natural English meaning",
+              "context": "Brief context details [e.g. used in Spain / informal]"
+            }
+          ]
+        }`;
+
+        const payload = {
+          contents: [{ parts: [{ text: userPrompt }] }],
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                cards: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      spanish: { type: "STRING" },
+                      english: { type: "STRING" },
+                      context: { type: "STRING", nullable: true }
+                    },
+                    required: ["spanish", "english"]
+                  }
+                }
+              },
+              required: ["cards"]
+            }
+          }
+        };
+
+        try {
+          const data = await callGeminiAPI('gemini-2.5-flash-preview-09-2025:generateContent', payload);
+          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          const parsed = JSON.parse(rawText);
+
+          if (parsed && Array.isArray(parsed.cards)) {
+            let addedCount = 0;
+            const updatedList = [...flashcards];
+
+            parsed.cards.forEach(card => {
+              const isDuplicate = flashcards.some(
+                existing => existing.spanish.toLowerCase() === card.spanish.trim().toLowerCase()
+              );
+              if (!isDuplicate) {
+                updatedList.push({
+                  id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                  spanish: card.spanish.trim(),
+                  english: card.english.trim(),
+                  context: card.context ? card.context.trim() : null,
+                  box: 1,
+                  nextReview: Date.now()
+                });
+                addedCount++;
+              }
+            });
+
+            setFlashcards(updatedList);
+            setCustomTopic('');
+            triggerToast(`AI added ${addedCount} custom phrases for: "${customTopic}"!`, "success");
+          } else {
+            throw new Error("Invalid output layout from JSON compiler");
+          }
+        } catch (err) {
+          console.error(err);
+          triggerToast("AI Topic builder encountered an processing error. Try standardizing your prompt.", "error");
+        } finally {
+          setAiGeneratingTopic(false);
+        }
+      };
+
+      // --- Custom Keep Checklist Parsing Engine ---
+      const parseKeepLines = (text) => {
+        const lines = text.split('\n');
+        const parsed = [];
+        
+        lines.forEach(line => {
+          let cleanLine = line.trim();
+          if (!cleanLine) return;
+
+          // Clean Keep checkbox strings (e.g. [] or [ ] or [x])
+          cleanLine = cleanLine.replace(/^\[\s*[xX]?\s*\]\s*/, '');
+
+          // Parse Bracketed extra Context Notes if present anywhere
+          let extractedContext = null;
+          const bracketMatch = cleanLine.match(/\[(.*?)\]/);
+          if (bracketMatch) {
+            extractedContext = bracketMatch[1].trim();
+            // Remove brackets and its inner contents from base strings
+            cleanLine = cleanLine.replace(/\[.*?\]/, '').trim();
+          }
+
+          // Split targets on any dash variant: hyphen (-), en-dash (–), or em-dash (—)
+          const parts = cleanLine.split(/\s*(?:[-–—])\s*/);
+          if (parts.length >= 2) {
+            const spanish = parts[0].trim();
+            const english = parts.slice(1).join(' - ').trim();
+            if (spanish && english) {
+              parsed.push({ spanish, english, context: extractedContext });
+            }
+          } else if (cleanLine.length > 0) {
+            // Fallback: entire cleaned line becomes target phrase
+            parsed.push({ spanish: cleanLine, english: '', context: extractedContext });
+          }
+        });
+        return parsed;
+      };
+
+      // --- Trigger Raw Text Loading Action ---
+      const handleLoadIngestData = () => {
+        if (!bulkInput.trim()) {
+          triggerToast("Please input some lines to parse.", "error");
+          return;
+        }
+
+        const parsedCards = parseKeepLines(bulkInput);
+        if (parsedCards.length === 0) {
+          triggerToast("Could not extract any cards. Make sure phrases are separated by dashes.", "error");
+          return;
+        }
+
+        let duplicatesFiltered = 0;
+        const freshDeck = [...flashcards];
+
+        parsedCards.forEach(parsed => {
+          const isDuplicate = flashcards.some(
+            card => card.spanish.toLowerCase() === parsed.spanish.toLowerCase()
+          );
+
+          if (!isDuplicate) {
+            freshDeck.push({
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+              spanish: parsed.spanish,
+              english: parsed.english,
+              context: parsed.context,
+              box: 1, // Start directly in Leitner Box 1
+              nextReview: Date.now()
+            });
+          } else {
+            duplicatesFiltered++;
+          }
+        });
+
+        setFlashcards(freshDeck);
+        setBulkInput('');
+        triggerToast(
+          `Successfully loaded ${parsedCards.length - duplicatesFiltered} cards! (${duplicatesFiltered} skipped as duplicates)`,
+          "success"
+        );
+      };
+
+      // --- Leitner Grading Rules Engine ---
+      const handleGradeCard = (gotIt) => {
+        if (sessionCards.length === 0) return;
+        const currentCard = sessionCards[currentIndex];
+
+        let newBox = currentCard.box;
+        if (gotIt) {
+          newBox = Math.min(5, currentCard.box + 1);
+        } else {
+          newBox = 1; // Reset straight down to 1
+        }
+
+        const calculatedInterval = BOX_INTERVALS[newBox];
+        const nextReviewTimestamp = Date.now() + calculatedInterval;
+
+        // Persist update in main database
+        setFlashcards(prev =>
+          prev.map(c =>
+            c.id === currentCard.id
+              ? { ...c, box: newBox, nextReview: nextReviewTimestamp }
+              : c
+          )
+        );
+
+        // Manage session transitions
+        if (!gotIt) {
+          // Polished study UX: Move forgotten items back into rotation later in this session
+          const updatedCardWithReset = { ...currentCard, box: 1, nextReview: Date.now() };
+          setSessionCards(prev => [...prev, updatedCardWithReset]);
+          triggerToast("Kept in study cycle. Retrying again shortly!", "info");
+        } else {
+          triggerToast(`Advanced to Box ${newBox}! Scheduled for future study.`, "success");
+        }
+
+        // Transition to next card or wrap up
+        setIsRevealed(false);
+        setAiSenseiContent(null);
+        setCurrentIndex(prev => prev + 1);
+      };
+
+      // --- Manual Individual Add ---
+      const handleManualAdd = (e) => {
+        e.preventDefault();
+        if (!manualSpanish.trim() || !manualEnglish.trim()) {
+          triggerToast("Both Spanish phrase and English translation are required.", "error");
+          return;
+        }
+
+        const isDuplicate = flashcards.some(
+          c => c.spanish.toLowerCase().trim() === manualSpanish.toLowerCase().trim()
+        );
+
+        if (isDuplicate) {
+          triggerToast("This exact Spanish phrase already exists.", "error");
+          return;
+        }
+
+        const newCard = {
+          id: Date.now().toString(),
+          spanish: manualSpanish.trim(),
+          english: manualEnglish.trim(),
+          context: manualContext.trim() || null,
           box: 1,
           nextReview: Date.now()
         };
-        currentCards.push(newCard);
-        addedCount++;
-      } else {
-        duplicateCount++;
-      }
-    });
 
-    setCards(currentCards);
-    setPasteText('');
-    
-    if (addedCount > 0) {
-      addToast(`Successfully added ${addedCount} new cards!`, "success");
-    }
-    if (duplicateCount > 0) {
-      addToast(`Ignored ${duplicateCount} duplicate Spanish phrases.`, "info");
-    }
-  };
+        setFlashcards(prev => [newCard, ...prev]);
+        setManualSpanish('');
+        setManualEnglish('');
+        setManualContext('');
+        triggerToast("Flashcard added manually!", "success");
+      };
 
-  const loadDemoLibrary = () => {
-    const currentCards = [...cards];
-    let addedCount = 0;
+      // --- Edit Modal Handlers ---
+      const handleStartEdit = (card) => {
+        setEditingCardId(card.id);
+        setEditSpanish(card.spanish);
+        setEditEnglish(card.english);
+        setEditContext(card.context || '');
+      };
 
-    SEED_PHRASES.forEach(seed => {
-      const exists = currentCards.some(
-        c => c.spanish.toLowerCase() === seed.spanish.toLowerCase()
-      );
+      const handleSaveEdit = () => {
+        if (!editSpanish.trim() || !editEnglish.trim()) {
+          triggerToast("Spanish and English fields cannot be left blank.", "error");
+          return;
+        }
 
-      if (!exists) {
-        const newCard: Flashcard = {
-          id: (Date.now() + addedCount).toString() + Math.random().toString(36).substr(2, 5),
-          spanish: seed.spanish,
-          english: seed.english,
-          context: seed.context,
-          box: 1,
-          nextReview: Date.now()
-        };
-        currentCards.push(newCard);
-        addedCount++;
-      }
-    });
+        setFlashcards(prev =>
+          prev.map(c =>
+            c.id === editingCardId
+              ? { ...c, spanish: editSpanish.trim(), english: editEnglish.trim(), context: editContext.trim() || null }
+              : c
+          )
+        );
+        setEditingCardId(null);
+        triggerToast("Flashcard edits saved successfully!", "success");
+      };
 
-    setCards(currentCards);
-    addToast(`Loaded ${addedCount} conversational Spanish idioms!`, "success");
-  };
+      // --- Delete Handlers (with custom modal warnings) ---
+      const handleDeleteCard = (cardId) => {
+        setCustomConfirm({
+          title: "Delete Card",
+          message: "Are you sure you want to permanently delete this card from your system?",
+          onConfirm: () => {
+            setFlashcards(prev => prev.filter(c => c.id !== cardId));
+            triggerToast("Card deleted.", "info");
+            setCustomConfirm(null);
+          }
+        });
+      };
 
-  const triggerClearAll = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: "Clear Library Database?",
-      message: "Are you sure you want to completely erase all local flashcards? This action cannot be undone.",
-      onConfirm: () => {
-        setCards([]);
-        setSessionQueue([]);
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        addToast("Database wiped clean.", "info");
-      }
-    });
-  };
+      const handleClearAllData = () => {
+        setCustomConfirm({
+          title: "Danger Zone: Hard Reset",
+          message: "This will wipe ALL your cards and return back to initial default items. This operation cannot be undone. Are you sure?",
+          onConfirm: () => {
+            setFlashcards(INITIAL_VOCABULARY);
+            triggerToast("Database restored to default presets.", "info");
+            setCustomConfirm(null);
+          }
+        });
+      };
 
-  const triggerDeleteCard = (id: string, name: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: "Delete Flashcard",
-      message: `Are you sure you want to permanently remove "${name}" from your collection?`,
-      onConfirm: () => {
-        setCards(prev => prev.filter(c => c.id !== id));
-        setSessionQueue(prev => prev.filter(cardId => cardId !== id));
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        addToast("Card deleted.", "success");
-      }
-    });
-  };
+      // --- Filtered Database Query Engine ---
+      const filteredCards = useMemo(() => {
+        return flashcards.filter(card => {
+          const query = searchQuery.toLowerCase();
+          const matchesSearch =
+            card.spanish.toLowerCase().includes(query) ||
+            card.english.toLowerCase().includes(query) ||
+            (card.context && card.context.toLowerCase().includes(query));
 
-  const handleSaveEdit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingCard) return;
+          const matchesBox = filterBox === 'all' || card.box.toString() === filterBox;
 
-    if (!editingCard.spanish.trim() || !editingCard.english.trim()) {
-      addToast("Spanish and English entries cannot be blank.", "error");
-      return;
-    }
+          return matchesSearch && matchesBox;
+        });
+      }, [flashcards, searchQuery, filterBox]);
 
-    setCards(prev => prev.map(c => c.id === editingCard.id ? editingCard : c));
-    setEditingCard(null);
-    addToast("Card details modified.", "success");
-  };
+      // --- Active Studied Flashcard Handle ---
+      const currentActiveCard = sessionCards[currentIndex];
+      const cardsRemainingInSession = sessionCards.length - currentIndex;
 
-  const filteredAndSearchedCards = useMemo(() => {
-    return cards.filter(card => {
-      const matchSearch = 
-        card.spanish.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        card.english.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (card.context && card.context.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-      const matchBox = filterBox === 'all' || card.box === filterBox;
-      
-      return matchSearch && matchBox;
-    });
-  }, [cards, searchQuery, filterBox]);
-
-  return (
-    <div className="min-h-screen bg-[#FAF9F6] text-[#2C2A29] font-sans transition-colors duration-200 selection:bg-stone-200">
-      
-      {/* HEADER SECTION */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-[#EBE8E2]">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-[#4A5D4E] rounded-xl flex items-center justify-center text-white">
-              <BookOpen className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-lg font-extrabold tracking-tight text-stone-800">Satori Lingo</h1>
-              <p className="text-[10px] text-stone-400 font-medium tracking-wider uppercase">Leitner Repetition System</p>
-            </div>
-          </div>
-
-          {/* Navigational Tabs */}
-          <nav className="hidden md:flex items-center gap-1 bg-[#F3EFE9] p-1 rounded-xl border border-[#E2DCD3]">
-            <button
-              onClick={() => setActiveTab('study')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeTab === 'study'
-                  ? 'bg-white text-[#4A5D4E] shadow-xs'
-                  : 'text-stone-500 hover:text-stone-800'
-              }`}
-            >
-              <Layers className="h-3.5 w-3.5" />
-              <span>Review Deck</span>
-              {dueCards.length > 0 && (
-                <span className="bg-amber-100 text-amber-900 text-[10px] px-1.5 py-0.5 rounded-full font-bold ml-1">
-                  {dueCards.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('database')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeTab === 'database'
-                  ? 'bg-white text-[#4A5D4E] shadow-xs'
-                  : 'text-stone-500 hover:text-stone-800'
-              }`}
-            >
-              <Database className="h-3.5 w-3.5" />
-              <span>Card Database</span>
-              <span className="text-[10px] text-stone-400 font-bold">({cards.length})</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('ingest')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeTab === 'ingest'
-                  ? 'bg-white text-[#4A5D4E] shadow-xs'
-                  : 'text-stone-500 hover:text-stone-800'
-              }`}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Ingest & AI Tools</span>
-            </button>
-          </nav>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowApiSettings(true)}
-              className="px-3.5 py-2 border border-[#E2DCD3] hover:bg-[#F3EFE9] rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 text-stone-600"
-            >
-              <Key className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">AI Settings</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* MOBILE NAV SYSTEM */}
-      <div className="md:hidden sticky top-18 z-30 bg-[#FAF9F6] border-b border-[#EBE8E2] px-4 py-2 flex gap-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('study')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 ${
-            activeTab === 'study' ? 'bg-[#4A5D4E] text-white' : 'bg-white border border-[#EBE8E2] text-stone-600'
-          }`}
-        >
-          <span>Study ({dueCards.length})</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('database')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 ${
-            activeTab === 'database' ? 'bg-[#4A5D4E] text-white' : 'bg-white border border-[#EBE8E2] text-stone-600'
-          }`}
-        >
-          <span>Library ({cards.length})</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('ingest')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 ${
-            activeTab === 'ingest' ? 'bg-[#4A5D4E] text-white' : 'bg-white border border-[#EBE8E2] text-stone-600'
-          }`}
-        >
-          <span>Ingest & AI</span>
-        </button>
-      </div>
-
-      {/* MAIN LAYOUT WRAPPER */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-
-        {/* STATUS BRIEFING DASHBOARD */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      return (
+        <div class="max-w-6xl mx-auto px-4 py-8 md:py-12 flex flex-col min-h-screen">
           
-          {/* Card status counts */}
-          <div className="bg-white rounded-2xl border border-[#EBE8E2] p-5 shadow-xs flex items-center gap-4">
-            <div className="h-12 w-12 bg-[#F3EFE9] rounded-xl flex items-center justify-center text-[#4A5D4E] shrink-0">
-              <Layers className="h-5 w-5" />
+          {/* Toast Notification Banner */}
+          {toast && (
+            <div class="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-lg border shadow-xl transition-all duration-300 transform translate-y-0 animate-bounce bg-white border-japandi-border text-japandi-charcoal">
+              <span class={`w-2.5 h-2.5 rounded-full ${toast.type === 'success' ? 'bg-japandi-olive' : toast.type === 'error' ? 'bg-red-500' : 'bg-japandi-terracotta'}`}></span>
+              <p class="text-sm font-medium">{toast.message}</p>
             </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold tracking-wider text-stone-400">Library Summary</p>
-              <div className="flex items-baseline gap-2 mt-0.5">
-                <span className="text-xl font-extrabold text-stone-800">{cards.length}</span>
-                <span className="text-xs text-stone-400 font-medium">total phrases logged</span>
+          )}
+
+          {/* Dialog Confirmation Modal */}
+          {customConfirm && (
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+              <div class="bg-japandi-cream border border-japandi-border rounded-xl p-6 max-w-md w-full shadow-2xl animate-fade-in">
+                <h3 class="serif-font text-xl font-bold text-japandi-charcoal mb-2">{customConfirm.title}</h3>
+                <p class="text-japandi-muted text-sm mb-6">{customConfirm.message}</p>
+                <div class="flex items-center justify-end gap-3">
+                  <button 
+                    onClick={() => setCustomConfirm(null)}
+                    class="px-4 py-2 border border-japandi-border text-xs rounded hover:bg-japandi-paper transition duration-200"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={customConfirm.onConfirm}
+                    class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition duration-200"
+                  >
+                    Confirm Action
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          <div className="bg-white rounded-2xl border border-[#EBE8E2] p-5 shadow-xs flex items-center gap-4">
-            <div className="h-12 w-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-700 shrink-0">
-              <Flame className="h-5 w-5 animate-pulse" />
-            </div>
+          {/* Brand Header */}
+          <header class="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-japandi-border pb-6 mb-8 gap-4">
             <div>
-              <p className="text-[10px] uppercase font-bold tracking-wider text-amber-600">Pending Reviews</p>
-              <div className="flex items-baseline gap-2 mt-0.5">
-                <span className="text-xl font-extrabold text-amber-800">{dueCards.length}</span>
-                <span className="text-xs text-stone-400 font-medium">items scheduled</span>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="px-2 py-0.5 text-[10px] tracking-widest uppercase bg-japandi-terracotta/20 text-japandi-terracotta font-semibold rounded-full">Spaced Repetition</span>
+                <span class="px-2 py-0.5 text-[10px] tracking-widest uppercase bg-japandi-olive/10 text-japandi-olive font-semibold rounded-full">Quiet-Mode Active</span>
+              </div>
+              <h1 class="text-4xl font-extrabold text-japandi-charcoal leading-none">
+                Satori Lingo <span class="italic text-japandi-terracotta font-serif">悟り</span>
+              </h1>
+              <p class="text-xs text-japandi-muted mt-2">
+                A minimal Japanese-Scandinavian workspace focusing purely on visual recall and the classic Leitner Box system.
+              </p>
+            </div>
+
+            {/* Top Stats Dashboard */}
+            <div class="flex items-center gap-4 bg-japandi-paper border border-japandi-border p-4 rounded-xl w-full md:w-auto">
+              <div class="text-center pr-4 border-r border-japandi-border">
+                <span class="block text-[10px] uppercase tracking-wider text-japandi-muted font-medium">System Deck</span>
+                <span class="text-xl font-bold text-japandi-charcoal">{flashcards.length}</span>
+              </div>
+              <div class="text-center">
+                <span class="block text-[10px] uppercase tracking-wider text-japandi-muted font-medium">Due Right Now</span>
+                <span class="text-xl font-bold text-japandi-terracotta">{dueCards.length}</span>
               </div>
             </div>
-          </div>
+          </header>
 
-          {/* Leitner Box Matrix Grid */}
-          <div className="bg-white rounded-2xl border border-[#EBE8E2] p-5 shadow-xs flex flex-col justify-between">
-            <div className="flex justify-between items-center mb-1">
-              <p className="text-[10px] uppercase font-bold tracking-wider text-stone-400">Leitner Distribution Matrix</p>
-              <span className="text-[9px] font-bold text-stone-400 uppercase tracking-widest">Box 1 → 5</span>
-            </div>
-            <div className="grid grid-cols-5 gap-1.5 h-7">
-              {boxCounts.map((count, index) => {
-                const total = cards.length || 1;
-                const pct = Math.max((count / total) * 100, 8); // Minimum bar height representation
+          {/* Leitner Box Status Grid Tracker */}
+          <section class="mb-8 bg-white border border-japandi-border rounded-xl p-4 shadow-sm">
+            <h3 class="text-xs uppercase tracking-wider text-japandi-muted font-bold mb-3 flex items-center justify-between">
+              <span>Leitner Progression (Box 1 to 5)</span>
+              <span class="text-[11px] normal-case italic font-normal text-japandi-terracotta">Higher boxes schedule intervals up to 14 days</span>
+            </h3>
+            <div class="grid grid-cols-5 gap-2">
+              {[1, 2, 3, 4, 5].map(boxNum => {
+                const count = boxStats[boxNum] || 0;
+                const percentage = flashcards.length > 0 ? (count / flashcards.length) * 100 : 0;
                 return (
-                  <div key={index} className="h-full bg-stone-50 rounded-md relative overflow-hidden group border border-stone-100">
-                    <div 
-                      className="absolute bottom-0 left-0 right-0 bg-[#4A5D4E] transition-all duration-500"
-                      style={{ height: `${pct}%` }}
-                    ></div>
-                    <div className="absolute inset-0 flex items-center justify-center text-[9px] font-extrabold z-10 text-stone-800 group-hover:text-white transition-colors">
-                      {count}
+                  <div key={boxNum} class="bg-japandi-cream border border-japandi-border p-3 rounded-lg flex flex-col justify-between items-center text-center">
+                    <span class="text-[10px] font-bold text-japandi-muted">Box {boxNum}</span>
+                    <span class="text-lg font-bold text-japandi-charcoal my-1">{count}</span>
+                    <div class="w-full bg-japandi-paper rounded-full h-1 mt-1 overflow-hidden">
+                      <div class="bg-japandi-olive h-1" style={{ width: `${percentage}%` }}></div>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
+          </section>
 
-        </div>
+          {/* Workspace Workspace Navigation Tabs */}
+          <nav class="flex border-b border-japandi-border mb-8 gap-2">
+            <button
+              onClick={() => setActiveTab('study')}
+              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+                activeTab === 'study'
+                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
+              }`}
+            >
+              Study Desk ({dueCards.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('database')}
+              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+                activeTab === 'database'
+                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
+              }`}
+            >
+              Browse Vocabulary ({flashcards.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('ingest')}
+              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+                activeTab === 'ingest'
+                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
+              }`}
+            >
+              Add & Import Keep
+            </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+                activeTab === 'settings'
+                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
+              }`}
+            >
+              AI Key & Settings
+            </button>
+          </nav>
 
-        {/* TAB 1: CARD STUDY AREA */}
-        {activeTab === 'study' && (
-          <div className="max-w-2xl mx-auto">
-            {sessionQueue.length === 0 ? (
-              /* EMPTY DUE STATE */
-              <div className="bg-white rounded-3xl p-12 text-center border border-[#EBE8E2] shadow-xs max-w-lg mx-auto animate-fade-in">
-                <div className="h-16 w-16 bg-[#F3EFE9] text-[#4A5D4E] rounded-full flex items-center justify-center mx-auto mb-6">
-                  <Check className="h-8 w-8" />
-                </div>
-                <h3 className="text-2xl font-bold text-stone-800 mb-2">Garden is Clean</h3>
-                <p className="text-stone-500 text-sm mb-8 leading-relaxed">
-                  You have reviewed all due flashcards! To cement memory pathways, wait for the Leitner interval or cram existing terms anytime.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  {cards.length > 0 ? (
-                    <button 
-                      onClick={() => startSession(true)}
-                      className="px-6 py-3 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white text-sm font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                      Cram Cards Anyway
-                    </button>
-                  ) : (
-                    <button 
-                      onClick={() => loadDemoLibrary()}
-                      className="px-6 py-3 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white text-sm font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      Seed Conversational Idioms
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => { setActiveTab('ingest'); setIngestSubTab('ai'); }}
-                    className="px-6 py-3 border border-amber-200 bg-amber-50/50 hover:bg-amber-50 text-amber-900 text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Wand2 className="h-4 w-4" />
-                    AI Topic Generator
-                  </button>
-                </div>
-              </div>
-            ) : (
-              /* ACTIVE STUDY CARD TESTER */
-              <div className="space-y-4">
+          {/* MAIN VIEW CONTENT CONTAINER */}
+          <main class="flex-grow">
+            
+            {/* VIEW A: ACTIVE STUDY DESK */}
+            {activeTab === 'study' && (
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 
-                {/* Session Progress Header */}
-                <div className="flex justify-between items-center px-2">
-                  <span className="text-xs font-semibold text-stone-500 tracking-wider">
-                    {isCramMode ? "CRAMMING MODE (All items)" : "SPACED REPETITION REVIEW"}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-stone-600">
-                      Card {sessionIndex + 1} of {sessionQueue.length}
-                    </span>
-                    <button 
-                      onClick={() => startSession(isCramMode)}
-                      title="Reset Session"
-                      className="p-1 text-stone-400 hover:text-stone-600 transition-colors"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Progress bar */}
-                <div className="w-full bg-[#EAE5DF] h-1.5 rounded-full overflow-hidden">
-                  <div 
-                    className="bg-[#4A5D4E] h-full transition-all duration-300"
-                    style={{ width: `${((sessionIndex + 1) / sessionQueue.length) * 100}%` }}
-                  ></div>
-                </div>
-
-                {/* Flashcard Active Recall UI */}
-                {activeCard && (
-                  <div className="space-y-4">
-                    <div className="bg-white rounded-3xl border border-[#EBE8E2] shadow-sm overflow-hidden min-h-[360px] flex flex-col justify-between p-8 sm:p-10 relative">
+                {/* Left side: Interactive Deck Wrapper */}
+                <div class="lg:col-span-2 flex flex-col items-stretch">
+                  {cardsRemainingInSession > 0 && currentActiveCard ? (
+                    <div class="flex flex-col gap-6">
                       
-                      {/* Leitner Box Badge */}
-                      <div className="flex justify-between items-center">
-                        <span className="px-3 py-1 bg-[#F3EFE9] text-[#4A5D4E] text-xs font-bold rounded-full border border-[#E2DCD3]">
-                          Box {activeCard.box}
-                        </span>
+                      {/* Active Testing Module Card */}
+                      <div class="bg-white border-2 border-japandi-border rounded-2xl p-8 md:p-12 shadow-md relative min-h-[300px] flex flex-col justify-between transition-all duration-300">
                         
-                        {activeCard.context && (
-                          <div className="flex items-center gap-1 text-xs text-stone-400 font-medium">
-                            <Info className="h-3.5 w-3.5 text-stone-400" />
-                            <span>Context provided</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Core Prompt */}
-                      <div className="my-6 text-center space-y-6">
-                        
-                        {/* Active Recall: English First */}
-                        <div className="space-y-2">
-                          <span className="text-[10px] uppercase tracking-widest text-stone-400 font-bold block">English prompt</span>
-                          <h2 className="text-2xl sm:text-3xl font-bold text-stone-800 leading-snug">
-                            {activeCard.english}
-                          </h2>
+                        {/* Session Progress Header */}
+                        <div class="flex items-center justify-between text-xs text-japandi-muted pb-4 border-b border-japandi-paper mb-6">
+                          <span class="uppercase tracking-widest font-bold text-japandi-terracotta">Review Active</span>
+                          <span class="font-mono">{cardsRemainingInSession} card{cardsRemainingInSession > 1 ? 's' : ''} left this session</span>
                         </div>
 
-                        {/* Mnemonic Image Representation if cached */}
-                        {activeCard.aiImage && (
-                          <div className="flex justify-center my-4 animate-fade-in">
-                            <div className="relative group">
-                              <img 
-                                src={activeCard.aiImage} 
-                                alt="Visual Mnemonic Illustration" 
-                                className="w-48 h-48 rounded-full object-cover border border-[#EAE5DF] shadow-xs"
-                              />
-                              <span className="absolute bottom-1 right-1 bg-white/95 text-[9px] px-2 py-0.5 rounded-full text-stone-500 font-bold shadow-xs">
-                                Visual Mnemonic
-                              </span>
+                        {/* Testing Core Prompt */}
+                        <div class="flex-grow flex flex-col justify-center items-center text-center py-6">
+                          {!isRevealed ? (
+                            <div class="space-y-4">
+                              <span class="text-xs tracking-wider text-japandi-muted uppercase block">English recall prompt</span>
+                              <h2 class="serif-font text-3xl md:text-4xl font-bold text-japandi-charcoal leading-snug px-4">
+                                {currentActiveCard.english}
+                              </h2>
                             </div>
-                          </div>
-                        )}
+                          ) : (
+                            <div class="space-y-6 w-full animate-fade-in">
+                              <div class="border-b border-japandi-paper pb-4 mb-4">
+                                <span class="text-xs tracking-wider text-japandi-muted uppercase block mb-1">English Prompt</span>
+                                <p class="text-base text-japandi-muted italic font-medium">{currentActiveCard.english}</p>
+                              </div>
 
-                        {/* Revealed Spanish Target */}
-                        {isRevealed ? (
-                          <div className="pt-6 border-t border-[#FAF9F6] space-y-4 animate-fade-in">
-                            <span className="text-[10px] uppercase tracking-widest text-emerald-700 font-bold block">Spanish Phrase</span>
-                            
-                            <div className="flex items-center justify-center gap-2">
-                              <h3 className="text-3xl sm:text-4xl font-extrabold text-[#4A5D4E]">
-                                {activeCard.spanish}
-                              </h3>
+                              <div class="space-y-2">
+                                <span class="text-xs tracking-wider text-japandi-olive uppercase font-bold block">Correct Spanish Translation</span>
+                                <h2 class="serif-font text-3xl md:text-4xl font-extrabold text-japandi-olive leading-tight">
+                                  {currentActiveCard.spanish}
+                                </h2>
+                              </div>
+
+                              {currentActiveCard.context && (
+                                <div class="bg-japandi-paper inline-block rounded-lg px-4 py-2 border border-japandi-border text-xs text-japandi-muted max-w-lg mt-3">
+                                  <span class="font-bold block uppercase text-[10px] text-japandi-terracotta tracking-wider mb-0.5">Grammar & Usage Context</span>
+                                  {currentActiveCard.context}
+                                </div>
+                              )}
+
+                              {/* Persistent Image Cache */}
+                              {currentActiveCard.aiMnemonicCached && (
+                                <div class="mt-4 flex flex-col items-center">
+                                  <span class="text-[10px] uppercase tracking-widest text-japandi-muted block mb-2">Memory Trigger Sketch</span>
+                                  <img 
+                                    src={currentActiveCard.aiMnemonicCached} 
+                                    alt="Mnemonic Trigger" 
+                                    class="w-36 h-36 object-cover rounded-xl border border-japandi-border shadow-sm bg-japandi-cream"
+                                  />
+                                </div>
+                              )}
                             </div>
+                          )}
+                        </div>
 
-                            {activeCard.context && (
-                              <p className="text-xs italic text-stone-500 max-w-md mx-auto bg-stone-50 py-1.5 px-3 rounded-xl border border-stone-100 mt-1">
-                                [{activeCard.context}]
-                              </p>
+                        {/* Interactive Action Controls */}
+                        <div class="border-t border-japandi-paper pt-6 mt-8">
+                          {!isRevealed ? (
+                            <button
+                              onClick={() => setIsRevealed(true)}
+                              class="w-full py-4 px-6 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold rounded-xl transition duration-200 shadow-md text-sm uppercase tracking-wider"
+                            >
+                              Reveal Target Translation
+                            </button>
+                          ) : (
+                            <div class="grid grid-cols-2 gap-4">
+                              <button
+                                onClick={() => handleGradeCard(false)}
+                                class="py-4 px-6 bg-[#E5DCD8] hover:bg-[#DBCFCB] text-japandi-charcoal font-bold rounded-xl transition duration-200 text-sm uppercase tracking-wider border border-[#D5C6C0]"
+                              >
+                                Forgot It (Box 1)
+                              </button>
+                              <button
+                                onClick={() => handleGradeCard(true)}
+                                class="py-4 px-6 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold rounded-xl transition duration-200 text-sm uppercase tracking-wider shadow"
+                              >
+                                Got It (+1 Box)
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+
+                      {/* AI Utilities Panel (Available upon answers reveal) */}
+                      {isRevealed && (
+                        <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm flex flex-col gap-4">
+                          <h4 class="text-xs uppercase tracking-wider font-bold text-japandi-muted">Gemini Active AI Coprocessors</h4>
+                          
+                          <div class="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => handleAskAiSensei(currentActiveCard)}
+                              disabled={aiSenseiLoading}
+                              class="flex-1 min-w-[150px] py-2.5 px-4 bg-japandi-paper hover:bg-japandi-border text-japandi-charcoal font-semibold text-xs rounded-lg border border-japandi-border transition duration-150 flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              {aiSenseiLoading ? (
+                                <span>Consulting Sensei...</span>
+                              ) : (
+                                <span>💡 Ask AI Sensei Explainer</span>
+                              )}
+                            </button>
+
+                            {!currentActiveCard.aiMnemonicCached && (
+                              <button
+                                onClick={() => handleSketchMnemonic(currentActiveCard)}
+                                disabled={aiMnemonicLoading}
+                                class="flex-1 min-w-[150px] py-2.5 px-4 bg-japandi-paper hover:bg-japandi-border text-japandi-charcoal font-semibold text-xs rounded-lg border border-japandi-border transition duration-150 flex items-center justify-center gap-2 disabled:opacity-50"
+                              >
+                                {aiMnemonicLoading ? (
+                                  <span>Drawing Mnemonic...</span>
+                                ) : (
+                                  <span>🎨 Sketch Mnemonic Image</span>
+                                )}
+                              </button>
                             )}
                           </div>
-                        ) : (
-                          <div className="h-[80px] flex items-center justify-center">
-                            <p className="text-xs text-stone-400 italic font-medium">Try to say the Spanish target aloud, then click below</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Interactive Reveal and Score Actions */}
-                      <div className="space-y-4">
-                        {!isRevealed ? (
-                          <button
-                            onClick={() => {
-                              setIsRevealed(true);
-                            }}
-                            className="w-full py-4 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-                          >
-                            Reveal Target Phrase
-                            <kbd className="hidden sm:inline-block px-2 py-0.5 text-[10px] text-emerald-100 bg-emerald-800 rounded ml-2">Space</kbd>
-                          </button>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-4">
-                            <button
-                              onClick={() => handleScore(false)}
-                              className="py-4 border-2 border-rose-200 hover:bg-rose-50 text-rose-700 font-bold rounded-2xl transition-all flex flex-col items-center justify-center"
-                            >
-                              <span>Forgot It</span>
-                              <span className="text-[10px] text-rose-400 font-medium mt-0.5">Reset to Box 1</span>
-                              <kbd className="hidden sm:inline-block px-2 py-0.5 text-[10px] text-rose-200 bg-rose-800 rounded mt-1.5">Key 1</kbd>
-                            </button>
-
-                            <button
-                              onClick={() => handleScore(true)}
-                              className="py-4 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg flex flex-col items-center justify-center"
-                            >
-                              <span>Got It</span>
-                              <span className="text-[10px] text-stone-200 font-medium mt-0.5">Advance Box Level</span>
-                              <kbd className="hidden sm:inline-block px-2 py-0.5 text-[10px] text-[#4A5D4E] bg-stone-100 rounded mt-1.5">Key 2</kbd>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Gemini AI Integration Actions Panel (Revealed Cards only) */}
-                    {isRevealed && (
-                      <div className="bg-[#FAF9F6] rounded-3xl border border-[#EAE5DF] p-6 space-y-4 animate-fade-in">
-                        
-                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-                          <div>
-                            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#4A5D4E] flex items-center gap-1">
-                              <Brain className="h-3.5 w-3.5" />
-                              Satori AI Assistants
-                            </span>
-                            <p className="text-xs text-stone-500 mt-0.5">Harness Google Gemini directly inside Satori Lingo.</p>
-                          </div>
-
-                          <div className="flex gap-2 shrink-0">
-                            {/* Ask AI Sensei */}
-                            <button
-                              onClick={fetchAISenseiExplanation}
-                              disabled={isExplaining}
-                              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 disabled:opacity-50 text-emerald-800 text-xs font-bold rounded-xl transition-all"
-                            >
-                              {isExplaining ? (
-                                <>
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  <span>Sensei thinking...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Brain className="h-3.5 w-3.5" />
-                                  <span>{activeCard.aiExplanation ? "Refresh explanation" : "Ask AI Sensei"}</span>
-                                </>
-                              )}
-                            </button>
-
-                            {/* Create Mnemonic Art */}
-                            <button
-                              onClick={fetchAIMnemonicSketch}
-                              disabled={isGeneratingMnemonic}
-                              className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 disabled:opacity-50 text-amber-800 text-xs font-bold rounded-xl transition-all"
-                            >
-                              {isGeneratingMnemonic ? (
-                                <>
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  <span>Drawing sketch...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <ImageIcon className="h-3.5 w-3.5" />
-                                  <span>{activeCard.aiImage ? "Redraw sketch" : "Mnemonic Sketch"}</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
                         </div>
+                      )}
 
-                        {/* Rendering Satori Sensei Explanations */}
-                        {activeCard.aiExplanation && (
-                          <div className="bg-white rounded-2xl p-5 border border-[#EAE5DF] space-y-4 shadow-2xs animate-slide-in text-left">
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-stone-700 pb-2 border-b border-stone-100">
-                              <Compass className="h-4 w-4 text-[#4A5D4E]" />
-                              <span>Satori Sensei Structural & Cultural Review</span>
-                            </div>
+                    </div>
+                  ) : (
+                    <div class="bg-white border border-japandi-border rounded-2xl p-12 text-center shadow-sm py-16">
+                      <div class="text-6xl mb-4">🌟</div>
+                      <h3 class="serif-font text-3xl font-extrabold text-japandi-charcoal mb-2">Workspace Cleared</h3>
+                      <p class="text-sm text-japandi-muted max-w-md mx-auto mb-8">
+                        No phrases are due for active recall right now. Take a deep breath, review your complete vocabulary list, or ingest fresh ones.
+                      </p>
+                      <button
+                        onClick={startStudySession}
+                        class="px-6 py-3 bg-japandi-olive hover:bg-japandi-oliveHover text-white text-xs uppercase tracking-wider font-bold rounded-lg transition duration-150 shadow"
+                      >
+                        Reset & Practice All Cards Due
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-                            <div className="space-y-3">
-                              <div>
-                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">Literal Meaning:</span>
-                                <p className="text-xs text-stone-700 italic mt-0.5 font-medium leading-relaxed">
-                                  "{activeCard.aiExplanation.literalMeaning}"
-                                </p>
-                              </div>
+                {/* Right side: AI Explanation Output & Context Notes */}
+                <div class="flex flex-col gap-6">
+                  
+                  {/* Context Panel Content */}
+                  <div class="bg-[#F5F3EF] border border-japandi-border rounded-2xl p-6 shadow-inner min-h-[300px]">
+                    <h3 class="serif-font text-lg font-bold text-japandi-charcoal border-b border-japandi-border pb-3 mb-4">
+                      AI Sensei Explanations
+                    </h3>
 
-                              <div>
-                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">Cultural Context & Nuances:</span>
-                                <p className="text-xs text-stone-600 mt-0.5 leading-relaxed">
-                                  {activeCard.aiExplanation.culturalNuance}
-                                </p>
-                              </div>
+                    {aiSenseiLoading && (
+                      <div class="flex flex-col items-center justify-center py-12 text-center text-japandi-muted">
+                        <div class="w-8 h-8 border-4 border-japandi-terracotta border-t-transparent rounded-full animate-spin mb-4"></div>
+                        <p class="text-xs">Analyzing linguistics and cultural contexts...</p>
+                      </div>
+                    )}
 
-                              <div>
-                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">Real-life Situational Examples:</span>
-                                <div className="space-y-2 mt-1.5">
-                                  {activeCard.aiExplanation.examples.map((ex, idx) => (
-                                    <div 
-                                      key={idx} 
-                                      className="p-2.5 rounded-xl bg-[#FAF9F6] border border-stone-100 flex flex-col justify-start hover:bg-emerald-50/50 hover:border-emerald-100 transition-all text-xs"
-                                    >
-                                      <p className="font-bold text-[#2C2A29]">{ex.spanish}</p>
-                                      <p className="text-stone-500 font-medium mt-0.5">{ex.english}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                    {!aiSenseiLoading && !aiSenseiContent && !currentActiveCard?.aiSenseiCached && (
+                      <div class="text-center py-12 text-japandi-muted">
+                        <p class="text-xs italic leading-relaxed">
+                          Reveal the answer on your card and click "Ask AI Sensei" to generate grammatical breakdowns, literal translations, and regional slang contexts.
+                        </p>
+                      </div>
+                    )}
 
-                        {/* Rendering illustration load skeletons */}
-                        {(isExplaining || isGeneratingMnemonic) && (
-                          <div className="bg-white/60 rounded-2xl p-8 text-center border border-dashed border-stone-200 animate-pulse flex flex-col items-center justify-center space-y-3">
-                            <Wand2 className="h-8 w-8 text-stone-400 animate-spin" />
-                            <p className="text-xs text-stone-400 font-medium">Gemini API is tailoring custom knowledge blocks...</p>
-                          </div>
-                        )}
-
+                    {!aiSenseiLoading && (aiSenseiContent || currentActiveCard?.aiSenseiCached) && (
+                      <div class="text-xs text-japandi-charcoal leading-relaxed whitespace-pre-wrap select-text max-h-[400px] overflow-y-auto pr-2">
+                        {aiSenseiContent || currentActiveCard?.aiSenseiCached}
                       </div>
                     )}
                   </div>
-                )}
+
+                  {/* Leitner Box Schedule Reference Card */}
+                  <div class="bg-white border border-japandi-border rounded-2xl p-6">
+                    <h4 class="text-xs font-extrabold uppercase tracking-wider text-japandi-muted mb-3">Leitner Time Intervals</h4>
+                    <ul class="text-xs space-y-2 text-japandi-muted">
+                      <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 1:</span> <span>Immediate Recall (0s)</span></li>
+                      <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 2:</span> <span>24 Hours delay</span></li>
+                      <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 3:</span> <span>3 Days delay</span></li>
+                      <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 4:</span> <span>7 Days delay</span></li>
+                      <li class="flex justify-between pb-0.5"><span class="font-bold">Box 5:</span> <span>14 Days delay</span></li>
+                    </ul>
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
+            {/* VIEW B: VOCABULARY DATABASE BROWSER */}
+            {activeTab === 'database' && (
+              <div class="space-y-6">
                 
-                {/* Visual Keyboard Navigation Help (Audio removed) */}
-                <div className="hidden sm:flex items-center justify-center gap-6 text-xs text-stone-400 font-medium py-2">
-                  <div className="flex items-center gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-white border border-stone-200 rounded text-[10px]">Space</kbd>
-                    <span>Reveal</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-white border border-stone-200 rounded text-[10px]">1</kbd>
-                    <span>Forgot</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-white border border-stone-200 rounded text-[10px]">2</kbd>
-                    <span>Got It</span>
-                  </div>
-                </div>
-
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 2: FLASHCARD DATABASE MANAGER */}
-        {activeTab === 'database' && (
-          <div className="bg-white rounded-2xl border border-[#EBE8E2] shadow-xs p-6 animate-fade-in">
-            
-            {/* Database header actions */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-stone-100">
-              <div>
-                <h3 className="text-lg font-bold text-stone-800">Your Study Library</h3>
-                <p className="text-xs text-stone-500 mt-0.5">Maintain, search, and edit individual terms in Satori's local storage.</p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setShowAddForm(!showAddForm)}
-                  className="px-4 py-2 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>{showAddForm ? "Hide Form" : "Add Flashcard"}</span>
-                </button>
-                <button
-                  onClick={triggerClearAll}
-                  className="px-4 py-2 border border-rose-200 hover:bg-rose-50 text-rose-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>Wipe All Data</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Injected single add form */}
-            {showAddForm && (
-              <form onSubmit={handleAddCard} className="bg-[#FAF9F6] border border-[#EAE5DF] rounded-2xl p-5 mb-6 space-y-4 animate-slide-in">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-stone-600">English prompt meaning:</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. To speak one's mind"
-                      value={newEnglish}
-                      onChange={e => setNewEnglish(e.target.value)}
-                      className="w-full px-3.5 py-2 border border-stone-200 bg-white rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E]"
-                    />
+                {/* Search, Filter & Manual Add Area */}
+                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm">
+                  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-6 border-b border-japandi-paper">
+                    <h3 class="serif-font text-xl font-extrabold text-japandi-charcoal">Quick Card Ingestion</h3>
+                    <p class="text-xs text-japandi-muted">Add individual words manually to kick off Leitner Box 1 rotation.</p>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-stone-600">Spanish phrase target:</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. No tener pelos en la lengua"
-                      value={newSpanish}
-                      onChange={e => setNewSpanish(e.target.value)}
-                      className="w-full px-3.5 py-2 border border-stone-200 bg-white rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E]"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-stone-600">Bracketed clarification/Context (Optional):</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Idiom, literally: no hairs on tongue"
-                      value={newContext}
-                      onChange={e => setNewContext(e.target.value)}
-                      className="w-full px-3.5 py-2 border border-stone-200 bg-white rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E]"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddForm(false)}
-                    className="px-4 py-2 border border-[#EBE8E2] text-stone-600 hover:bg-stone-50 rounded-xl text-xs font-semibold"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white rounded-xl text-xs font-bold shadow-xs"
-                  >
-                    Save to Box 1
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Filter controls */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              
-              {/* Search Bar */}
-              <div className="relative md:col-span-2">
-                <Search className="absolute left-3.5 top-2.5 h-4.5 w-4.5 text-stone-400" />
-                <input
-                  type="text"
-                  placeholder="Search by Spanish, English, or Context note..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-stone-200 rounded-xl text-sm focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E] bg-[#FAF9F6]"
-                />
-                {searchQuery && (
-                  <button 
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-2.5 text-stone-400 hover:text-stone-600"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-
-              {/* Box Dropdown Selector */}
-              <div className="flex items-center gap-2">
-                <Sliders className="h-4 w-4 text-stone-400 shrink-0" />
-                <select
-                  value={filterBox}
-                  onChange={e => setFilterBox(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                  className="w-full px-3 py-2 border border-stone-200 rounded-xl text-sm focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E] bg-[#FAF9F6]"
-                >
-                  <option value="all">Filter: All Leitner Boxes</option>
-                  <option value="1">Box 1 (Immediate review)</option>
-                  <option value="2">Box 2 (24 hour cooldown)</option>
-                  <option value="3">Box 3 (3 days cooldown)</option>
-                  <option value="4">Box 4 (7 days cooldown)</option>
-                  <option value="5">Box 5 (14 days cooldown)</option>
-                </select>
-              </div>
-
-            </div>
-
-            {/* Cards List Grid rendering */}
-            {filteredAndSearchedCards.length === 0 ? (
-              <div className="text-center py-12 border border-dashed border-stone-200 rounded-2xl bg-[#FAF9F6]">
-                <Database className="h-10 w-10 text-stone-300 mx-auto mb-3" />
-                <p className="text-stone-500 text-sm">No cards matching filter parameters.</p>
-                <button 
-                  onClick={() => { setSearchQuery(''); setFilterBox('all'); }} 
-                  className="text-[#4A5D4E] text-xs font-semibold mt-1 hover:underline"
-                >
-                  Clear search filters
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-[#EAE5DF] text-stone-400 text-xs font-bold uppercase tracking-wider">
-                      <th className="py-3 px-4">Leitner Level</th>
-                      <th className="py-3 px-4">English Prompt</th>
-                      <th className="py-3 px-4">Spanish Phrase</th>
-                      <th className="py-3 px-4">Context / Extra Notes</th>
-                      <th className="py-3 px-4">Media</th>
-                      <th className="py-3 px-4">Review Schedule</th>
-                      <th className="py-3 px-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100 text-sm">
-                    {filteredAndSearchedCards.map((card) => {
-                      const relativeTime = getRelativeTimeString(card.nextReview);
-                      const isDue = card.nextReview <= Date.now();
-
-                      return (
-                        <tr key={card.id} className="hover:bg-[#FAF9F6]/50 transition-colors group">
-                          <td className="py-3.5 px-4">
-                            <span className="px-2.5 py-1 bg-[#F3EFE9] text-[#4A5D4E] text-xs font-extrabold rounded-md border border-[#E2DCD3]">
-                              Box {card.box}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 font-semibold text-stone-800">{card.english}</td>
-                          <td className="py-3.5 px-4 font-bold text-[#4A5D4E]">
-                            <span>{card.spanish}</span>
-                          </td>
-                          <td className="py-3.5 px-4 text-stone-500 italic max-w-xs truncate">
-                            {card.context ? `[${card.context}]` : <span className="text-stone-300">—</span>}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <div className="flex gap-1">
-                              {card.aiImage && (
-                                <span title="Has AI Mnemonic Sketch" className="p-1 bg-amber-50 text-amber-700 rounded-md border border-amber-200 text-[10px] font-bold">
-                                  🖼️ Sketch
-                                </span>
-                              )}
-                              {card.aiExplanation && (
-                                <span title="Has Detailed AI Breakdown" className="p-1 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-200 text-[10px] font-bold">
-                                  💡 AI Guru
-                                </span>
-                              )}
-                              {!card.aiImage && !card.aiExplanation && (
-                                <span className="text-stone-300">—</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${
-                              isDue 
-                                ? 'bg-amber-100 text-amber-800' 
-                                : 'bg-stone-100 text-stone-600'
-                            }`}>
-                              {relativeTime}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-right">
-                            <div className="flex justify-end gap-1">
-                              <button
-                                onClick={() => setEditingCard(card)}
-                                className="p-1.5 hover:bg-amber-50 text-stone-400 hover:text-amber-800 rounded transition-colors"
-                                title="Edit Card"
-                              >
-                                <Edit3 className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => triggerDeleteCard(card.id, card.spanish)}
-                                className="p-1.5 hover:bg-rose-50 text-stone-400 hover:text-rose-700 rounded transition-colors"
-                                title="Delete Card"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 3: BULK INGESTION & AI GENERATOR */}
-        {activeTab === 'ingest' && (
-          <div className="space-y-6 animate-fade-in">
-            
-            {/* Tab switch inside parser panel */}
-            <div className="flex border-b border-[#EAE5DF] max-w-md">
-              <button
-                onClick={() => setIngestSubTab('paste')}
-                className={`flex-1 py-3 text-center text-sm font-bold border-b-2 transition-all ${
-                  ingestSubTab === 'paste'
-                    ? 'border-b-[#4A5D4E] text-[#4A5D4E]'
-                    : 'border-b-transparent text-stone-400 hover:text-stone-600'
-                }`}
-              >
-                📋 Paste Google Keep lines
-              </button>
-              <button
-                onClick={() => setIngestSubTab('ai')}
-                className={`flex-1 py-3 text-center text-sm font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 ${
-                  ingestSubTab === 'ai'
-                    ? 'border-b-[#4A5D4E] text-[#4A5D4E]'
-                    : 'border-b-transparent text-stone-400 hover:text-stone-600'
-                }`}
-              >
-                <Sparkles className="h-4 w-4 text-[#4A5D4E]" />
-                <span>AI Topic Deck Builder</span>
-              </button>
-            </div>
-
-            {ingestSubTab === 'paste' ? (
-              /* STANDARD KEEP PASTER */
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-2 bg-white rounded-2xl border border-[#EBE8E2] p-6 shadow-xs space-y-4">
-                  <div>
-                    <h3 className="text-lg font-bold text-stone-800">Keep Clipboard Ingestion</h3>
-                    <p className="text-xs text-stone-500 mt-1">
-                      Paste lists directly from Google Keep. Satori auto-cleans checklist circles, bracketed clarifications, and varied dash signs.
-                    </p>
-                  </div>
-
-                  {/* Text Area */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-stone-600">Raw checklist text lines:</label>
-                    <textarea
-                      rows={10}
-                      value={pasteText}
-                      onChange={e => setPasteText(e.target.value)}
-                      placeholder={`[] tuve una idea- to came up with an idea [literally: I had an idea]
-[] Lo que resulta en que - which results in
-[] Desde luego - of course`}
-                      className="w-full p-4 border border-stone-200 rounded-2xl text-sm font-mono focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E] bg-[#FAF9F6] leading-relaxed"
-                    ></textarea>
-                  </div>
-
-                  {/* Action Operations */}
-                  <div className="flex gap-3 justify-end">
-                    <button
-                      onClick={() => setPasteText('')}
-                      className="px-5 py-2.5 border border-[#EBE8E2] hover:bg-stone-50 rounded-xl text-xs font-semibold text-stone-600 transition-colors"
-                    >
-                      Clear Area
-                    </button>
-                    <button
-                      onClick={handleBulkLoad}
-                      className="px-5 py-2.5 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white text-xs font-semibold rounded-xl transition-colors shadow-xs"
-                    >
-                      Load Phrases Into Database
-                    </button>
-                  </div>
-                </div>
-
-                {/* Parser Info Documentation Sidebar */}
-                <div className="bg-white rounded-2xl border border-[#EBE8E2] p-6 shadow-xs space-y-6">
-                  <div>
-                    <h4 className="text-sm font-bold text-stone-800 flex items-center gap-1.5">
-                      <HelpCircle className="h-4 w-4 text-[#4A5D4E]" />
-                      Accepted Parser Syntax
-                    </h4>
-                    <p className="text-xs text-stone-500 mt-1">Keep checklists often export as follows:</p>
-                  </div>
-
-                  <div className="space-y-4 text-xs">
-                    <div className="bg-[#FAF9F6] border border-[#EBE8E2] p-3 rounded-xl space-y-1 font-mono text-stone-600">
-                      <p>[] Tuve una idea - to come up with an idea [Idiomatic expression]</p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <p className="font-semibold text-stone-700">Supported Syntax Features:</p>
-                      <ul className="list-disc pl-4 space-y-1.5 text-stone-500">
-                        <li>Checkbox markers (<code className="bg-stone-100 px-1 py-0.5 rounded">[]</code> or <code className="bg-stone-100 px-1 py-0.5 rounded">[ ]</code>) are automatically removed.</li>
-                        <li>Both sides are split by hyphen separators (<code className="bg-stone-100 px-1 py-0.5 rounded">-</code>, <code className="bg-stone-100 px-1 py-0.5 rounded">–</code>, or <code className="bg-stone-100 px-1 py-0.5 rounded">—</code>).</li>
-                        <li>Clarifications/Notes inside brackets (<code className="bg-stone-100 px-1 py-0.5 rounded">[...]</code>) are isolated as searchable context clues.</li>
-                        <li>Exactly matched existing Spanish target phrases are automatically discarded as duplicates to prevent library noise.</li>
-                      </ul>
-                    </div>
-
-                    <div className="pt-4 border-t border-stone-100">
-                      <p className="font-semibold text-stone-700 mb-2">Need a sample start?</p>
-                      <button
-                        onClick={loadDemoLibrary}
-                        className="w-full py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl font-bold transition-all text-center"
-                      >
-                        Seed 10 Conversational Spanish Idioms
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* AI SENSEI DECK GENERATOR */
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-2 bg-white rounded-2xl border border-[#EBE8E2] p-6 shadow-xs space-y-6">
-                  
-                  <div>
-                    <h3 className="text-lg font-bold text-stone-800 flex items-center gap-1.5">
-                      <Sparkles className="h-5 w-5 text-amber-600" />
-                      Instantly Craft Decks with Gemini
-                    </h3>
-                    <p className="text-xs text-stone-500 mt-1">
-                      State any theme, scenario or location, and Gemini will engineer a customized package of 5 high-yield learning phrases complete with context.
-                    </p>
-                  </div>
-
-                  <form onSubmit={generateAITopicVocabulary} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      
-                      {/* Tone Register Selection */}
-                      <div>
-                        <label className="block text-xs font-bold text-stone-600 mb-1">Tone & Register</label>
-                        <select
-                          value={aiPromptTone}
-                          onChange={e => setAiPromptTone(e.target.value)}
-                          className="w-full px-3.5 py-2.5 border border-stone-200 bg-[#FAF9F6] rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E]"
-                        >
-                          <option value="Idiomatic / Conversational">🇪🇸 Conversational & Idiomatic (Slang)</option>
-                          <option value="Essential Survival">📍 Essential Survival Vocabulary</option>
-                          <option value="Polite & Business">💼 Formal, Polite & Business Spanish</option>
-                          <option value="Poetic & Literary">📖 Advanced Literary & Metaphorical</option>
-                        </select>
-                      </div>
-
-                      {/* Level Selection */}
-                      <div>
-                        <label className="block text-xs font-bold text-stone-600 mb-1">Target Skill Level</label>
-                        <select
-                          value={aiPromptLevel}
-                          onChange={e => setAiPromptLevel(e.target.value)}
-                          className="w-full px-3.5 py-2.5 border border-stone-200 bg-[#FAF9F6] rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E]"
-                        >
-                          <option value="Principiante (A1-A2)">Principiante (A1-A2)</option>
-                          <option value="Intermedio (B1-B2)">Intermedio (B1-B2)</option>
-                          <option value="Avanzado (C1-C2)">Avanzado (C1-C2)</option>
-                        </select>
-                      </div>
-
-                    </div>
-
+                  <form onSubmit={handleManualAdd} class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-xs font-bold text-stone-600 mb-1">Topic, Location, or Specific Intent</label>
+                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Spanish phrase</label>
                       <input
                         type="text"
-                        required
-                        placeholder="e.g., Complaining about food in a tapas bar, arguing politely about train delays, buying clothes"
-                        value={aiPromptTopic}
-                        onChange={e => setAiPromptTopic(e.target.value)}
-                        className="w-full px-3.5 py-2.5 border border-stone-200 bg-[#FAF9F6] rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E]"
+                        placeholder="e.g. echar de menos"
+                        value={manualSpanish}
+                        onChange={(e) => setManualSpanish(e.target.value)}
+                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">English translation</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. to miss someone"
+                        value={manualEnglish}
+                        onChange={(e) => setManualEnglish(e.target.value)}
+                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                      />
+                    </div>
+                    <div class="flex items-end gap-2">
+                      <div class="flex-grow">
+                        <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Optional context [notes]</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Used mostly in Spain"
+                          value={manualContext}
+                          onChange={(e) => setManualContext(e.target.value)}
+                          class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        class="px-4 py-2.5 bg-japandi-olive hover:bg-japandi-oliveHover text-white text-xs uppercase tracking-wider font-bold rounded-lg transition duration-150 shadow"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Database Search Filter Controls */}
+                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm">
+                  <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                    
+                    {/* Search Field */}
+                    <div class="flex-grow">
+                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Search Vocabulary Query</label>
+                      <input
+                        type="text"
+                        placeholder="Search Spanish, English, or Context Notes..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
                       />
                     </div>
 
-                    <div className="flex justify-end">
-                      <button
-                        type="submit"
-                        disabled={isAiGeneratingVocab}
-                        className="px-5 py-3 bg-[#4A5D4E] hover:bg-[#3D4C40] disabled:bg-stone-300 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-2"
+                    {/* Filter Dropdown */}
+                    <div class="md:w-48">
+                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Leitner Level Filter</label>
+                      <select
+                        value={filterBox}
+                        onChange={(e) => setFilterBox(e.target.value)}
+                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
                       >
-                        {isAiGeneratingVocab ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span>Sensei is compiling cards...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Brain className="h-4 w-4 text-emerald-100" />
-                            <span>Generate AI Deck (+5)</span>
-                          </>
-                        )}
-                      </button>
+                        <option value="all">All Boxes (1 - 5)</option>
+                        <option value="1">Box 1 (Immediate)</option>
+                        <option value="2">Box 2 (24 hrs)</option>
+                        <option value="3">Box 3 (3 days)</option>
+                        <option value="4">Box 4 (7 days)</option>
+                        <option value="5">Box 5 (14 days)</option>
+                      </select>
                     </div>
 
-                  </form>
-
-                  {/* AI Generated preview deck */}
-                  {aiGeneratedPreview.length > 0 && (
-                    <div className="pt-6 border-t border-stone-100 space-y-4 animate-slide-in">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-stone-700">Preview Created Flashcards</span>
-                        <button
-                          onClick={importAIGeneratedCards}
-                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs"
-                        >
-                          <ArrowDownToLine className="h-4 w-4" />
-                          <span>Import All to Leitner Box 1</span>
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {aiGeneratedPreview.map((card, idx) => (
-                          <div key={idx} className="bg-[#FAF9F6] p-4 rounded-2xl border border-[#EAE5DF] space-y-1 relative group">
-                            <span className="absolute top-2 right-2 text-[10px] text-stone-400 font-bold">Preview #{idx + 1}</span>
-                            <p className="text-xs font-bold text-[#4A5D4E]">{card.spanish}</p>
-                            <p className="text-xs text-stone-700 font-medium">{card.english}</p>
-                            <p className="text-[10px] text-stone-400 italic">[{card.context}]</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
+                  </div>
                 </div>
 
-                {/* AI Helper Quick Suggest Card */}
-                <div className="bg-white rounded-2xl border border-[#EBE8E2] p-6 shadow-xs space-y-4 flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-bold text-stone-800 flex items-center gap-1.5">
-                      <Compass className="h-4 w-4 text-[#4A5D4E]" />
-                      Sensei Quick Topics
-                    </h4>
-                    <p className="text-xs text-stone-500 leading-relaxed">
-                      Need inspiration? Tap any of Satori Sensei's high-conversion scenarios below to pre-populate:
+                {/* Table View Component */}
+                <div class="bg-white border border-japandi-border rounded-2xl overflow-hidden shadow-sm">
+                  {filteredCards.length > 0 ? (
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left border-collapse">
+                        <thead>
+                          <tr class="bg-japandi-paper border-b border-japandi-border text-[10px] uppercase tracking-wider text-japandi-muted">
+                            <th class="px-6 py-4 font-bold">Spanish Target</th>
+                            <th class="px-6 py-4 font-bold">English Meaning</th>
+                            <th class="px-6 py-4 font-bold">Context / Notes</th>
+                            <th class="px-6 py-4 font-bold text-center">Box Stage</th>
+                            <th class="px-6 py-4 font-bold text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-japandi-paper text-sm text-japandi-charcoal">
+                          {filteredCards.map(card => {
+                            const isEditing = editingCardId === card.id;
+                            const isOverdue = card.nextReview <= Date.now();
+                            return (
+                              <tr key={card.id} class="hover:bg-japandi-cream/50 transition duration-150">
+                                <td class="px-6 py-4 font-bold">
+                                  {isEditing ? (
+                                    <input
+                                      type="text"
+                                      value={editSpanish}
+                                      onChange={(e) => setEditSpanish(e.target.value)}
+                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded"
+                                    />
+                                  ) : (
+                                    <span>{card.spanish}</span>
+                                  )}
+                                </td>
+                                <td class="px-6 py-4">
+                                  {isEditing ? (
+                                    <input
+                                      type="text"
+                                      value={editEnglish}
+                                      onChange={(e) => setEditEnglish(e.target.value)}
+                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded"
+                                    />
+                                  ) : (
+                                    <span>{card.english}</span>
+                                  )}
+                                </td>
+                                <td class="px-6 py-4 text-xs text-japandi-muted">
+                                  {isEditing ? (
+                                    <input
+                                      type="text"
+                                      value={editContext}
+                                      onChange={(e) => setEditContext(e.target.value)}
+                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded"
+                                    />
+                                  ) : (
+                                    <span>{card.context || <span class="italic text-gray-300">None</span>}</span>
+                                  )}
+                                </td>
+                                <td class="px-6 py-4 text-center">
+                                  <span class="inline-block px-2.5 py-1 bg-japandi-paper border border-japandi-border rounded-full font-bold text-xs">
+                                    Box {card.box}
+                                  </span>
+                                </td>
+                                <td class="px-6 py-4 text-right">
+                                  <div class="flex items-center justify-end gap-2">
+                                    {isEditing ? (
+                                      <>
+                                        <button
+                                          onClick={handleSaveEdit}
+                                          class="px-3 py-1 bg-japandi-olive text-white text-xs font-bold rounded hover:bg-japandi-oliveHover"
+                                        >
+                                          Save
+                                        </button>
+                                        <button
+                                          onClick={() => setEditingCardId(null)}
+                                          class="px-3 py-1 bg-japandi-paper text-japandi-charcoal text-xs font-bold rounded border border-japandi-border hover:bg-japandi-border"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          onClick={() => handleStartEdit(card)}
+                                          class="px-2.5 py-1 bg-japandi-paper border border-japandi-border text-xs rounded hover:bg-japandi-cream text-japandi-charcoal"
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          onClick={() => handleDeleteCard(card.id)}
+                                          class="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 text-xs rounded"
+                                        >
+                                          Delete
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div class="text-center py-12 text-japandi-muted">
+                      <p class="text-xs">No cards match the active search criteria or Leitner Box level filter.</p>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
+
+            {/* VIEW C: BULK ADD & IMPORT KEEP */}
+            {activeTab === 'ingest' && (
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                
+                {/* Keep Ingestion Box */}
+                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <h3 class="serif-font text-2xl font-extrabold text-japandi-charcoal mb-2">Ingest Google Keep Checklists</h3>
+                    <p class="text-xs text-japandi-muted mb-6 leading-relaxed">
+                      Copy raw text lines directly from your Google Keep checkbox lists. The parser automatically strips checkbox markers (<code class="bg-japandi-paper px-1 rounded">[]</code>), resolves multiple dashes, isolates the Spanish target phrase, and separates bracketed context data.
                     </p>
 
-                    <div className="space-y-2">
-                      {[
-                        { title: "🍢 Tapas Bar Banter in Madrid", desc: "How to order and grab waiters' attention with native ease." },
-                        { title: "✈️ Escalated Boarding Disagreement", desc: "Expressing irritation elegantly at airport gate workers." },
-                        { title: "💑 Poetic expressions of romantic love", desc: "Expressions with intense, vintage passion." },
-                        { title: "🚇 Lost in Seville Subway", desc: "Navigating directions and asking locals for help." }
-                      ].map((item, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => setAiPromptTopic(item.title)}
-                          className="w-full text-left p-3 bg-[#FAF9F6] border border-[#EAE5DF] hover:border-[#4A5D4E] hover:bg-white rounded-xl transition-all space-y-0.5 group"
-                        >
-                          <span className="text-xs font-bold text-[#2C2A29] group-hover:text-[#4A5D4E] transition-colors">{item.title}</span>
-                          <p className="text-[10px] text-stone-400 leading-normal">{item.desc}</p>
-                        </button>
-                      ))}
+                    <div class="mb-6">
+                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-2">
+                        Paste Raw Checklist Blocks
+                      </label>
+                      <textarea
+                        rows="8"
+                        placeholder="[] tuve una idea- to came up with an idea&#10;[] Lo que resulta en que - which results in&#10;[] Como se come esto?  - How does that work? [¿Qué significa eso? ¿Cómo funciona eso?]"
+                        value={bulkInput}
+                        onChange={(e) => setBulkInput(e.target.value)}
+                        class="w-full px-4 py-3 text-xs bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive font-mono"
+                      ></textarea>
                     </div>
                   </div>
 
-                  <p className="text-[10px] text-stone-400 italic leading-snug">
-                    Cards are automatically assigned to Leitner Box 1. Review interval scheduling kicks off the moment you finish studying them.
-                  </p>
-                </div>
-
-              </div>
-            )}
-
-          </div>
-        )}
-
-      </main>
-
-      {/* FOOTER AREA */}
-      <footer className="mt-20 border-t border-[#EAE5DF] bg-[#FAF9F6] py-12 text-stone-400 text-xs">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
-          <div>
-            <p className="font-bold text-stone-600">Satori Lingo Study Space</p>
-            <p className="mt-1">In-browser system powered by standard LocalStorage synchronization and Google Gemini LLMs.</p>
-          </div>
-          <div className="flex gap-4">
-            <span className="font-semibold">Privacy Guaranteed</span>
-            <span className="text-stone-300">|</span>
-            <span className="font-semibold">Satori Repetition System</span>
-          </div>
-        </div>
-      </footer>
-
-      {}
-      {/* 1. API SETTINGS MODAL */}
-      {showApiSettings && (
-        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl border border-[#EBE8E2] max-w-md w-full p-6 space-y-5 shadow-xl animate-scale-in text-left">
-            <div className="flex justify-between items-center pb-2 border-b border-stone-100">
-              <div className="flex items-center gap-2">
-                <Key className="h-5 w-5 text-[#4A5D4E]" />
-                <h3 className="font-extrabold text-stone-800 text-base">Gemini API Configuration</h3>
-              </div>
-              <button 
-                onClick={() => setShowApiSettings(false)}
-                className="p-1 hover:bg-stone-50 text-stone-400 hover:text-stone-600 rounded-lg transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-xs text-stone-500 leading-relaxed">
-                Connect Google AI Studio directly to your workspace. Your key is stored locally in your browser cache and is never sent to any external server other than Google's secure AI systems.
-              </p>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-stone-600">Gemini API Key:</label>
-                <input
-                  type="password"
-                  placeholder="Paste AI Studio API Key..."
-                  value={customApiKey}
-                  onChange={e => setCustomApiKey(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-stone-200 bg-[#FAF9F6] rounded-xl text-xs font-mono focus:outline-hidden focus:ring-1 focus:ring-[#4A5D4E]"
-                />
-              </div>
-
-              <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl flex items-start gap-2.5">
-                <AlertTriangle className="h-4.5 w-4.5 shrink-0 text-amber-700 mt-0.5" />
-                <p className="text-[10px] font-medium leading-normal">
-                  No key? Grab a 100% free developer credential with hundreds of daily calls at <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="underline font-bold hover:text-amber-950">aistudio.google.com</a>. No credit card required.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={() => {
-                  setShowApiSettings(false);
-                  addToast("Gemini credentials configured locally!", "success");
-                }}
-                className="px-5 py-2.5 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
-              >
-                Save Settings
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. INLINE CARD EDITOR MODAL */}
-      {editingCard && (
-        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
-          <form onSubmit={handleSaveEdit} className="bg-white rounded-3xl border border-[#EBE8E2] max-w-md w-full p-6 space-y-4 shadow-xl animate-scale-in text-left">
-            <div className="flex justify-between items-center pb-2 border-b border-stone-100">
-              <h3 className="font-extrabold text-stone-800 text-base">Edit Flashcard</h3>
-              <button 
-                type="button"
-                onClick={() => setEditingCard(null)}
-                className="p-1 text-stone-400 hover:text-stone-600 rounded-lg"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-stone-600">English prompt meaning:</label>
-                <input
-                  type="text"
-                  required
-                  value={editingCard.english}
-                  onChange={e => setEditingCard({ ...editingCard, english: e.target.value })}
-                  className="w-full px-3.5 py-2 border border-stone-200 rounded-xl text-xs"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-stone-600">Spanish phrase target:</label>
-                <input
-                  type="text"
-                  required
-                  value={editingCard.spanish}
-                  onChange={e => setEditingCard({ ...editingCard, spanish: e.target.value })}
-                  className="w-full px-3.5 py-2 border border-stone-200 rounded-xl text-xs"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-stone-600">Context / Clues:</label>
-                <input
-                  type="text"
-                  value={editingCard.context || ''}
-                  onChange={e => setEditingCard({ ...editingCard, context: e.target.value || null })}
-                  className="w-full px-3.5 py-2 border border-stone-200 rounded-xl text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 pt-1">
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-stone-600">Leitner Level:</label>
-                  <select
-                    value={editingCard.box}
-                    onChange={e => setEditingCard({ ...editingCard, box: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-stone-200 bg-[#FAF9F6] rounded-xl text-xs"
-                  >
-                    <option value="1">Box 1 (Immediate)</option>
-                    <option value="2">Box 2 (24 Hours)</option>
-                    <option value="3">Box 3 (3 Days)</option>
-                    <option value="4">Box 4 (7 Days)</option>
-                    <option value="5">Box 5 (14 Days)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-stone-600">Scheduler Reset:</label>
                   <button
-                    type="button"
-                    onClick={() => setEditingCard({ ...editingCard, nextReview: Date.now() })}
-                    className="w-full py-2 border border-amber-300 bg-amber-50/50 hover:bg-amber-100/50 text-amber-900 rounded-xl text-[10px] font-bold transition-all text-center"
+                    onClick={handleLoadIngestData}
+                    class="w-full py-4.5 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold text-xs uppercase tracking-wider rounded-xl transition duration-150 shadow-md"
                   >
-                    Reset Review Schedule
+                    Load & Filter Duplicate Phrases
                   </button>
                 </div>
+
+                {/* Gemini Custom Generator Card */}
+                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <h3 class="serif-font text-2xl font-extrabold text-japandi-charcoal mb-2">AI Topic Deck Generator</h3>
+                    <p class="text-xs text-japandi-muted mb-6 leading-relaxed">
+                      Need specialized flashcards? Describe a specific vocabulary topic or social scenario. Google Gemini will build 8 highly-authentic expressions styled in Satori Lingo's structure directly into Box 1.
+                    </p>
+
+                    <div class="mb-6">
+                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-2">
+                        Topic / Scenario Goal
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g., Checking into a boutique hotel in Seville"
+                        value={customTopic}
+                        onChange={(e) => setCustomTopic(e.target.value)}
+                        class="w-full px-4 py-3 text-xs bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive"
+                      />
+                      
+                      <div class="mt-4">
+                        <span class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-2">Popular Presets</span>
+                        <div class="flex flex-wrap gap-1.5">
+                          {[
+                            "Disputing taxi fare",
+                            "Navigating restaurant allergy warnings",
+                            "Polite expressions for refusal",
+                            "Urgent Spanish medical concerns"
+                          ].map(preset => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => setCustomTopic(preset)}
+                              class="text-[11px] bg-japandi-paper border border-japandi-border hover:bg-japandi-border px-2.5 py-1 rounded transition"
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleGenerateTopicDeck}
+                    disabled={aiGeneratingTopic || !apiKey}
+                    class="w-full py-4.5 bg-japandi-terracotta hover:bg-[#B37E70] text-white font-bold text-xs uppercase tracking-wider rounded-xl transition duration-150 shadow-md disabled:opacity-50"
+                  >
+                    {aiGeneratingTopic ? "Consulting Neural Model..." : "Generate AI Custom Scenario Deck"}
+                  </button>
+                </div>
+
               </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
-              <button
-                type="button"
-                onClick={() => setEditingCard(null)}
-                className="px-4 py-2 border border-[#EBE8E2] text-stone-600 hover:bg-stone-50 rounded-xl text-xs font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-[#4A5D4E] hover:bg-[#3D4C40] text-white rounded-xl text-xs font-bold"
-              >
-                Save Changes
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* 3. CONFIRMATION DIALOGUE OVERLAY */}
-      {confirmModal.isOpen && (
-        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl border border-[#EBE8E2] max-w-sm w-full p-6 space-y-4 shadow-xl animate-scale-in text-left">
-            <div className="flex items-center gap-2 text-rose-700">
-              <AlertTriangle className="h-5 w-5" />
-              <h3 className="font-extrabold text-stone-800 text-base">{confirmModal.title}</h3>
-            </div>
-
-            <p className="text-xs text-stone-500 leading-relaxed">
-              {confirmModal.message}
-            </p>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                className="px-4 py-2 border border-[#EBE8E2] text-stone-600 hover:bg-stone-50 rounded-xl text-xs font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmModal.onConfirm}
-                className="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold shadow-xs"
-              >
-                Yes, Proceed
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TOAST SYSTEM CONTAINER */}
-      <div className="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none max-w-sm w-full">
-        {toasts.map(toast => (
-          <div 
-            key={toast.id} 
-            className={`p-3.5 rounded-2xl shadow-md border flex items-center gap-2.5 transition-all duration-300 pointer-events-auto animate-slide-in text-xs ${
-              toast.type === 'error'
-                ? 'bg-rose-50 border-rose-200 text-rose-900'
-                : toast.type === 'info'
-                ? 'bg-stone-50 border-stone-200 text-stone-800'
-                : 'bg-emerald-50 border-emerald-200 text-emerald-950'
-            }`}
-          >
-            {toast.type === 'error' ? (
-              <AlertTriangle className="h-4 w-4 text-rose-700 shrink-0" />
-            ) : toast.type === 'info' ? (
-              <Info className="h-4 w-4 text-stone-600 shrink-0" />
-            ) : (
-              <CheckCircle className="h-4 w-4 text-emerald-700 shrink-0" />
             )}
-            <p className="font-semibold leading-normal">{toast.message}</p>
-          </div>
-        ))}
-      </div>
 
-    </div>
-  );
-}
+            {/* VIEW D: AI SETTINGS & KEYS */}
+            {activeTab === 'settings' && (
+              <div class="bg-white border border-japandi-border rounded-2xl p-8 shadow-sm max-w-2xl mx-auto">
+                <h3 class="serif-font text-2xl font-extrabold text-japandi-charcoal mb-2">AI Setup & Key Settings</h3>
+                <p class="text-xs text-japandi-muted mb-6 leading-relaxed">
+                  Provide your developer API Key to access generative explanations and graphic mnemonics. Your key is stored locally in your own web browser's secure memory (`localStorage`) and never exits to external databases.
+                </p>
+
+                <div class="space-y-6">
+                  <div>
+                    <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">
+                      Gemini API Key (Google AI Studio)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="Paste your AIzaSy... developer key"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      class="w-full px-4 py-3 text-sm bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive font-mono"
+                    />
+                    <span class="block text-[10px] text-japandi-muted mt-2">
+                      Get a 100% free developer credential key from the official portal at <a href="https://aistudio.google.com" target="_blank" class="underline text-japandi-terracotta font-semibold">aistudio.google.com</a>.
+                    </span>
+                  </div>
+
+                  <div class="pt-6 border-t border-japandi-paper">
+                    <h4 class="serif-font text-lg font-bold text-japandi-charcoal mb-2 text-red-700">Database Administration</h4>
+                    <p class="text-xs text-japandi-muted mb-4">Wipe your vocabulary data, cached images, and resets system tracking statistics.</p>
+                    
+                    <button
+                      onClick={handleClearAllData}
+                      class="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs uppercase tracking-wider font-bold rounded-lg transition duration-150 shadow"
+                    >
+                      Clear All Flashcard Data
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </main>
+
+          {/* Core Footer Info & Setup Assistance */}
+          <footer class="mt-12 pt-6 border-t border-japandi-border text-center flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-japandi-muted">
+            <p>© 2026 Satori Lingo Workspace. Silent Leitner Box Mode.</p>
+            <p>Runs entirely offline in browser • State managed via localStorage</p>
+          </footer>
+
+        </div>
+      );
+    }
+
+    // Render React App
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+
+</body>
+</html>
