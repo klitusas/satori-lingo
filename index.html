@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Viewport meta tag optimized for touch scale control -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Satori Lingo — Spaced Repetition Workspace</title>
   
   <!-- Tailwind CSS -->
@@ -43,25 +44,35 @@
   <style>
     body {
       font-family: 'Plus Jakarta Sans', sans-serif;
+      /* Prevent elastic bounce-scrolling anomalies on mobile webview platforms */
+      overscroll-behavior-y: contain;
     }
     h1, h2, h3, .serif-font {
       font-family: 'Playfair Display', serif;
     }
-    /* Hide scrollbar for clean aesthetic */
+    /* Hide scrollbars for ultra-clean mobile navigation sliders */
+    .scrollbar-none::-webkit-scrollbar {
+      display: none;
+    }
+    .scrollbar-none {
+      -ms-overflow-style: none;  /* IE and Edge */
+      scrollbar-width: none;  /* Firefox */
+    }
+    /* Optimized system scrollbars for desktop */
     ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
+      width: 5px;
+      height: 5px;
     }
     ::-webkit-scrollbar-track {
       background: #F5F3EF;
     }
     ::-webkit-scrollbar-thumb {
       background: #C28C7E;
-      border-radius: 3px;
+      border-radius: 4px;
     }
   </style>
 </head>
-<body class="bg-japandi-cream text-japandi-charcoal min-h-screen">
+<body class="bg-japandi-cream text-japandi-charcoal min-h-screen antialiased">
 
   <div id="root"></div>
 
@@ -167,7 +178,6 @@
       // --- Initialize Study Session ---
       const startStudySession = () => {
         if (dueCards.length > 0) {
-          // Clone due cards into active temporary study loop state
           setSessionCards([...dueCards]);
           setCurrentIndex(0);
           setIsRevealed(false);
@@ -231,7 +241,6 @@
           const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (responseText) {
             setAiSenseiContent(responseText);
-            // Cache the explanation directly into the card in the database for instant future recall
             setFlashcards(prev => prev.map(c => c.id === card.id ? { ...c, aiSenseiCached: responseText } : c));
             triggerToast("AI Sensei explanation loaded and cached!", "success");
           } else {
@@ -265,7 +274,6 @@
           const base64Bytes = data.predictions?.[0]?.bytesBase64Encoded;
           if (base64Bytes) {
             const imageUrl = `data:image/png;base64,${base64Bytes}`;
-            // Cache base64 image onto the card permanently
             setFlashcards(prev => prev.map(c => c.id === card.id ? { ...c, aiMnemonicCached: imageUrl } : c));
             triggerToast("Mnemonic sketch generated successfully!", "success");
           } else {
@@ -279,7 +287,7 @@
         }
       };
 
-      // --- AI Topic-Driven Phrase Builder (Structured JSON Generation) ---
+      // --- AI Topic-Driven Phrase Builder ---
       const handleGenerateTopicDeck = async () => {
         if (!apiKey) {
           triggerToast("Please enter an API Key in settings first.", "error");
@@ -380,19 +388,15 @@
           let cleanLine = line.trim();
           if (!cleanLine) return;
 
-          // Clean Keep checkbox strings (e.g. [] or [ ] or [x])
           cleanLine = cleanLine.replace(/^\[\s*[xX]?\s*\]\s*/, '');
 
-          // Parse Bracketed extra Context Notes if present anywhere
           let extractedContext = null;
           const bracketMatch = cleanLine.match(/\[(.*?)\]/);
           if (bracketMatch) {
             extractedContext = bracketMatch[1].trim();
-            // Remove brackets and its inner contents from base strings
             cleanLine = cleanLine.replace(/\[.*?\]/, '').trim();
           }
 
-          // Split targets on any dash variant: hyphen (-), en-dash (–), or em-dash (—)
           const parts = cleanLine.split(/\s*(?:[-–—])\s*/);
           if (parts.length >= 2) {
             const spanish = parts[0].trim();
@@ -401,7 +405,6 @@
               parsed.push({ spanish, english, context: extractedContext });
             }
           } else if (cleanLine.length > 0) {
-            // Fallback: entire cleaned line becomes target phrase
             parsed.push({ spanish: cleanLine, english: '', context: extractedContext });
           }
         });
@@ -435,7 +438,7 @@
               spanish: parsed.spanish,
               english: parsed.english,
               context: parsed.context,
-              box: 1, // Start directly in Leitner Box 1
+              box: 1, 
               nextReview: Date.now()
             });
           } else {
@@ -460,13 +463,12 @@
         if (gotIt) {
           newBox = Math.min(5, currentCard.box + 1);
         } else {
-          newBox = 1; // Reset straight down to 1
+          newBox = 1; 
         }
 
         const calculatedInterval = BOX_INTERVALS[newBox];
         const nextReviewTimestamp = Date.now() + calculatedInterval;
 
-        // Persist update in main database
         setFlashcards(prev =>
           prev.map(c =>
             c.id === currentCard.id
@@ -475,9 +477,7 @@
           )
         );
 
-        // Manage session transitions
         if (!gotIt) {
-          // Polished study UX: Move forgotten items back into rotation later in this session
           const updatedCardWithReset = { ...currentCard, box: 1, nextReview: Date.now() };
           setSessionCards(prev => [...prev, updatedCardWithReset]);
           triggerToast("Kept in study cycle. Retrying again shortly!", "info");
@@ -485,7 +485,6 @@
           triggerToast(`Advanced to Box ${newBox}! Scheduled for future study.`, "success");
         }
 
-        // Transition to next card or wrap up
         setIsRevealed(false);
         setAiSenseiContent(null);
         setCurrentIndex(prev => prev + 1);
@@ -549,7 +548,7 @@
         triggerToast("Flashcard edits saved successfully!", "success");
       };
 
-      // --- Delete Handlers (with custom modal warnings) ---
+      // --- Delete Handlers ---
       const handleDeleteCard = (cardId) => {
         setCustomConfirm({
           title: "Delete Card",
@@ -589,37 +588,36 @@
         });
       }, [flashcards, searchQuery, filterBox]);
 
-      // --- Active Studied Flashcard Handle ---
       const currentActiveCard = sessionCards[currentIndex];
       const cardsRemainingInSession = sessionCards.length - currentIndex;
 
       return (
-        <div class="max-w-6xl mx-auto px-4 py-8 md:py-12 flex flex-col min-h-screen">
+        <div class="max-w-6xl mx-auto px-4 py-6 md:py-12 flex flex-col min-h-screen">
           
           {/* Toast Notification Banner */}
           {toast && (
-            <div class="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-lg border shadow-xl transition-all duration-300 transform translate-y-0 animate-bounce bg-white border-japandi-border text-japandi-charcoal">
-              <span class={`w-2.5 h-2.5 rounded-full ${toast.type === 'success' ? 'bg-japandi-olive' : toast.type === 'error' ? 'bg-red-500' : 'bg-japandi-terracotta'}`}></span>
-              <p class="text-sm font-medium">{toast.message}</p>
+            <div class="fixed bottom-4 right-4 left-4 md:left-auto md:bottom-6 md:right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl border shadow-2xl bg-white border-japandi-border text-japandi-charcoal animate-bounce">
+              <span class={`w-2.5 h-2.5 rounded-full shrink-0 ${toast.type === 'success' ? 'bg-japandi-olive' : toast.type === 'error' ? 'bg-red-500' : 'bg-japandi-terracotta'}`}></span>
+              <p class="text-xs md:text-sm font-medium">{toast.message}</p>
             </div>
           )}
 
           {/* Dialog Confirmation Modal */}
           {customConfirm && (
-            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-              <div class="bg-japandi-cream border border-japandi-border rounded-xl p-6 max-w-md w-full shadow-2xl animate-fade-in">
-                <h3 class="serif-font text-xl font-bold text-japandi-charcoal mb-2">{customConfirm.title}</h3>
-                <p class="text-japandi-muted text-sm mb-6">{customConfirm.message}</p>
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+              <div class="bg-japandi-cream border border-japandi-border rounded-2xl p-5 md:p-6 max-w-md w-full shadow-2xl">
+                <h3 class="serif-font text-lg md:text-xl font-bold text-japandi-charcoal mb-2">{customConfirm.title}</h3>
+                <p class="text-japandi-muted text-xs md:text-sm mb-6">{customConfirm.message}</p>
                 <div class="flex items-center justify-end gap-3">
                   <button 
                     onClick={() => setCustomConfirm(null)}
-                    class="px-4 py-2 border border-japandi-border text-xs rounded hover:bg-japandi-paper transition duration-200"
+                    class="px-4 py-2 border border-japandi-border text-xs rounded-xl hover:bg-japandi-paper transition duration-200 min-h-[40px] font-medium"
                   >
                     Cancel
                   </button>
                   <button 
                     onClick={customConfirm.onConfirm}
-                    class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition duration-200"
+                    class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs rounded-xl transition duration-200 min-h-[40px] font-medium"
                   >
                     Confirm Action
                   </button>
@@ -628,48 +626,52 @@
             </div>
           )}
 
+          {}
           {/* Brand Header */}
-          <header class="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-japandi-border pb-6 mb-8 gap-4">
+          <header class="flex flex-col md:flex-row items-stretch md:items-center justify-between border-b border-japandi-border pb-5 mb-6 md:mb-8 gap-4">
             <div>
-              <div class="flex items-center gap-2 mb-1">
-                <span class="px-2 py-0.5 text-[10px] tracking-widest uppercase bg-japandi-terracotta/20 text-japandi-terracotta font-semibold rounded-full">Spaced Repetition</span>
-                <span class="px-2 py-0.5 text-[10px] tracking-widest uppercase bg-japandi-olive/10 text-japandi-olive font-semibold rounded-full">Quiet-Mode Active</span>
+              <div class="flex flex-wrap items-center gap-2 mb-2">
+                <span class="px-2 py-0.5 text-[9px] tracking-widest uppercase bg-japandi-terracotta/20 text-japandi-terracotta font-bold rounded-full">Spaced Repetition</span>
+                <span class="px-2 py-0.5 text-[9px] tracking-widest uppercase bg-japandi-olive/10 text-japandi-olive font-bold rounded-full">Quiet-Mode Active</span>
               </div>
-              <h1 class="text-4xl font-extrabold text-japandi-charcoal leading-none">
+              <h1 class="text-3xl md:text-4xl font-extrabold text-japandi-charcoal leading-none">
                 Satori Lingo <span class="italic text-japandi-terracotta font-serif">悟り</span>
               </h1>
-              <p class="text-xs text-japandi-muted mt-2">
+              <p class="text-xs text-japandi-muted mt-2 max-w-md">
                 A minimal Japanese-Scandinavian workspace focusing purely on visual recall and the classic Leitner Box system.
               </p>
             </div>
 
             {/* Top Stats Dashboard */}
-            <div class="flex items-center gap-4 bg-japandi-paper border border-japandi-border p-4 rounded-xl w-full md:w-auto">
-              <div class="text-center pr-4 border-r border-japandi-border">
-                <span class="block text-[10px] uppercase tracking-wider text-japandi-muted font-medium">System Deck</span>
-                <span class="text-xl font-bold text-japandi-charcoal">{flashcards.length}</span>
+            <div class="flex items-center gap-4 bg-japandi-paper border border-japandi-border p-3 md:p-4 rounded-xl">
+              <div class="flex-1 text-center pr-4 border-r border-japandi-border">
+                <span class="block text-[9px] md:text-[10px] uppercase tracking-wider text-japandi-muted font-bold">System Deck</span>
+                <span class="text-lg md:text-xl font-extrabold text-japandi-charcoal">{flashcards.length}</span>
               </div>
-              <div class="text-center">
-                <span class="block text-[10px] uppercase tracking-wider text-japandi-muted font-medium">Due Right Now</span>
-                <span class="text-xl font-bold text-japandi-terracotta">{dueCards.length}</span>
+              <div class="flex-1 text-center">
+                <span class="block text-[9px] md:text-[10px] uppercase tracking-wider text-japandi-muted font-bold">Due Right Now</span>
+                <span class="text-lg md:text-xl font-extrabold text-japandi-terracotta">{dueCards.length}</span>
               </div>
             </div>
           </header>
 
+          {}
           {/* Leitner Box Status Grid Tracker */}
-          <section class="mb-8 bg-white border border-japandi-border rounded-xl p-4 shadow-sm">
-            <h3 class="text-xs uppercase tracking-wider text-japandi-muted font-bold mb-3 flex items-center justify-between">
+          <section class="mb-6 md:mb-8 bg-white border border-japandi-border rounded-xl p-3 md:p-4 shadow-2xs">
+            <h3 class="text-[10px] uppercase tracking-wider text-japandi-muted font-extrabold mb-3 flex items-center justify-between">
               <span>Leitner Progression (Box 1 to 5)</span>
-              <span class="text-[11px] normal-case italic font-normal text-japandi-terracotta">Higher boxes schedule intervals up to 14 days</span>
+              <span class="hidden md:inline text-[11px] normal-case italic font-normal text-japandi-terracotta">Higher boxes schedule intervals up to 14 days</span>
             </h3>
-            <div class="grid grid-cols-5 gap-2">
+            <div class="grid grid-cols-5 gap-1.5 md:gap-2">
               {[1, 2, 3, 4, 5].map(boxNum => {
                 const count = boxStats[boxNum] || 0;
                 const percentage = flashcards.length > 0 ? (count / flashcards.length) * 100 : 0;
                 return (
-                  <div key={boxNum} class="bg-japandi-cream border border-japandi-border p-3 rounded-lg flex flex-col justify-between items-center text-center">
-                    <span class="text-[10px] font-bold text-japandi-muted">Box {boxNum}</span>
-                    <span class="text-lg font-bold text-japandi-charcoal my-1">{count}</span>
+                  <div key={boxNum} class="bg-japandi-cream border border-japandi-border p-1.5 md:p-3 rounded-xl flex flex-col justify-between items-center text-center">
+                    <span class="text-[9px] md:text-[10px] font-bold text-japandi-muted">
+                      <span class="md:hidden">B</span><span class="hidden md:inline">Box </span>{boxNum}
+                    </span>
+                    <span class="text-sm md:text-lg font-extrabold text-japandi-charcoal my-0.5 md:my-1">{count}</span>
                     <div class="w-full bg-japandi-paper rounded-full h-1 mt-1 overflow-hidden">
                       <div class="bg-japandi-olive h-1" style={{ width: `${percentage}%` }}></div>
                     </div>
@@ -679,13 +681,14 @@
             </div>
           </section>
 
-          {/* Workspace Workspace Navigation Tabs */}
-          <nav class="flex border-b border-japandi-border mb-8 gap-2">
+          {}
+          {/* Workspace Navigation Tabs with Mobile Touch-slide */}
+          <nav class="flex border-b border-japandi-border mb-6 md:mb-8 gap-2 overflow-x-auto scrollbar-none whitespace-nowrap -mx-4 px-4 md:mx-0 md:px-0">
             <button
               onClick={() => setActiveTab('study')}
-              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+              class={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold tracking-wide transition duration-200 border-b-2 shrink-0 ${
                 activeTab === 'study'
-                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  ? 'border-japandi-olive text-japandi-olive font-extrabold'
                   : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
               }`}
             >
@@ -693,9 +696,9 @@
             </button>
             <button
               onClick={() => setActiveTab('database')}
-              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+              class={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold tracking-wide transition duration-200 border-b-2 shrink-0 ${
                 activeTab === 'database'
-                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  ? 'border-japandi-olive text-japandi-olive font-extrabold'
                   : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
               }`}
             >
@@ -703,9 +706,9 @@
             </button>
             <button
               onClick={() => setActiveTab('ingest')}
-              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+              class={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold tracking-wide transition duration-200 border-b-2 shrink-0 ${
                 activeTab === 'ingest'
-                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  ? 'border-japandi-olive text-japandi-olive font-extrabold'
                   : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
               }`}
             >
@@ -713,9 +716,9 @@
             </button>
             <button
               onClick={() => setActiveTab('settings')}
-              class={`px-4 py-2.5 text-sm font-semibold tracking-wide transition duration-200 border-b-2 ${
+              class={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold tracking-wide transition duration-200 border-b-2 shrink-0 ${
                 activeTab === 'settings'
-                  ? 'border-japandi-olive text-japandi-olive font-bold'
+                  ? 'border-japandi-olive text-japandi-olive font-extrabold'
                   : 'border-transparent text-japandi-muted hover:text-japandi-charcoal'
               }`}
             >
@@ -728,48 +731,48 @@
             
             {/* VIEW A: ACTIVE STUDY DESK */}
             {activeTab === 'study' && (
-              <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 
                 {/* Left side: Interactive Deck Wrapper */}
                 <div class="lg:col-span-2 flex flex-col items-stretch">
                   {cardsRemainingInSession > 0 && currentActiveCard ? (
-                    <div class="flex flex-col gap-6">
+                    <div class="flex flex-col gap-5 md:gap-6">
                       
                       {/* Active Testing Module Card */}
-                      <div class="bg-white border-2 border-japandi-border rounded-2xl p-8 md:p-12 shadow-md relative min-h-[300px] flex flex-col justify-between transition-all duration-300">
+                      <div class="bg-white border-2 border-japandi-border rounded-2xl p-5 md:p-12 shadow-sm relative min-h-[300px] flex flex-col justify-between transition-all duration-300">
                         
                         {/* Session Progress Header */}
-                        <div class="flex items-center justify-between text-xs text-japandi-muted pb-4 border-b border-japandi-paper mb-6">
-                          <span class="uppercase tracking-widest font-bold text-japandi-terracotta">Review Active</span>
-                          <span class="font-mono">{cardsRemainingInSession} card{cardsRemainingInSession > 1 ? 's' : ''} left this session</span>
+                        <div class="flex items-center justify-between text-xs text-japandi-muted pb-3 border-b border-japandi-paper mb-4 md:mb-6">
+                          <span class="uppercase tracking-widest font-extrabold text-japandi-terracotta text-[10px]">Review Active</span>
+                          <span class="font-mono text-[11px]">{cardsRemainingInSession} card{cardsRemainingInSession > 1 ? 's' : ''} left</span>
                         </div>
 
                         {/* Testing Core Prompt */}
-                        <div class="flex-grow flex flex-col justify-center items-center text-center py-6">
+                        <div class="flex-grow flex flex-col justify-center items-center text-center py-4 md:py-6">
                           {!isRevealed ? (
-                            <div class="space-y-4">
-                              <span class="text-xs tracking-wider text-japandi-muted uppercase block">English recall prompt</span>
-                              <h2 class="serif-font text-3xl md:text-4xl font-bold text-japandi-charcoal leading-snug px-4">
+                            <div class="space-y-3">
+                              <span class="text-[10px] tracking-wider text-japandi-muted uppercase block font-bold">English recall prompt</span>
+                              <h2 class="serif-font text-2xl md:text-4xl font-bold text-japandi-charcoal leading-snug px-2">
                                 {currentActiveCard.english}
                               </h2>
                             </div>
                           ) : (
-                            <div class="space-y-6 w-full animate-fade-in">
-                              <div class="border-b border-japandi-paper pb-4 mb-4">
-                                <span class="text-xs tracking-wider text-japandi-muted uppercase block mb-1">English Prompt</span>
-                                <p class="text-base text-japandi-muted italic font-medium">{currentActiveCard.english}</p>
+                            <div class="space-y-5 md:space-y-6 w-full">
+                              <div class="border-b border-japandi-paper pb-3 mb-3">
+                                <span class="text-[10px] tracking-wider text-japandi-muted uppercase block mb-1 font-bold">English Prompt</span>
+                                <p class="text-sm md:text-base text-japandi-muted italic font-medium">{currentActiveCard.english}</p>
                               </div>
 
                               <div class="space-y-2">
-                                <span class="text-xs tracking-wider text-japandi-olive uppercase font-bold block">Correct Spanish Translation</span>
-                                <h2 class="serif-font text-3xl md:text-4xl font-extrabold text-japandi-olive leading-tight">
+                                <span class="text-[10px] tracking-wider text-japandi-olive uppercase font-bold block">Correct Spanish Translation</span>
+                                <h2 class="serif-font text-2xl md:text-4xl font-extrabold text-japandi-olive leading-tight">
                                   {currentActiveCard.spanish}
                                 </h2>
                               </div>
 
                               {currentActiveCard.context && (
-                                <div class="bg-japandi-paper inline-block rounded-lg px-4 py-2 border border-japandi-border text-xs text-japandi-muted max-w-lg mt-3">
-                                  <span class="font-bold block uppercase text-[10px] text-japandi-terracotta tracking-wider mb-0.5">Grammar & Usage Context</span>
+                                <div class="bg-japandi-paper inline-block rounded-lg px-3.5 py-2 border border-japandi-border text-xs text-japandi-muted max-w-full">
+                                  <span class="font-extrabold block uppercase text-[9px] text-japandi-terracotta tracking-wider mb-0.5">Grammar & Usage Context</span>
                                   {currentActiveCard.context}
                                 </div>
                               )}
@@ -777,11 +780,11 @@
                               {/* Persistent Image Cache */}
                               {currentActiveCard.aiMnemonicCached && (
                                 <div class="mt-4 flex flex-col items-center">
-                                  <span class="text-[10px] uppercase tracking-widest text-japandi-muted block mb-2">Memory Trigger Sketch</span>
+                                  <span class="text-[9px] uppercase tracking-widest text-japandi-muted block mb-2 font-bold">Memory Trigger Sketch</span>
                                   <img 
                                     src={currentActiveCard.aiMnemonicCached} 
                                     alt="Mnemonic Trigger" 
-                                    class="w-36 h-36 object-cover rounded-xl border border-japandi-border shadow-sm bg-japandi-cream"
+                                    class="w-28 h-28 md:w-36 md:h-36 object-cover rounded-xl border border-japandi-border shadow-xs bg-japandi-cream"
                                   />
                                 </div>
                               )}
@@ -790,25 +793,25 @@
                         </div>
 
                         {/* Interactive Action Controls */}
-                        <div class="border-t border-japandi-paper pt-6 mt-8">
+                        <div class="border-t border-japandi-paper pt-4 md:pt-6 mt-6">
                           {!isRevealed ? (
                             <button
                               onClick={() => setIsRevealed(true)}
-                              class="w-full py-4 px-6 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold rounded-xl transition duration-200 shadow-md text-sm uppercase tracking-wider"
+                              class="w-full py-3 md:py-4 px-6 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold rounded-xl transition duration-200 shadow-md text-xs md:text-sm uppercase tracking-wider min-h-[48px]"
                             >
                               Reveal Target Translation
                             </button>
                           ) : (
-                            <div class="grid grid-cols-2 gap-4">
+                            <div class="grid grid-cols-2 gap-3 md:gap-4">
                               <button
                                 onClick={() => handleGradeCard(false)}
-                                class="py-4 px-6 bg-[#E5DCD8] hover:bg-[#DBCFCB] text-japandi-charcoal font-bold rounded-xl transition duration-200 text-sm uppercase tracking-wider border border-[#D5C6C0]"
+                                class="py-3 md:py-4 px-3 bg-[#E5DCD8] hover:bg-[#DBCFCB] text-japandi-charcoal font-bold rounded-xl transition duration-200 text-xs md:text-sm uppercase tracking-wider border border-[#D5C6C0] min-h-[48px]"
                               >
-                                Forgot It (Box 1)
+                                Forgot It (B1)
                               </button>
                               <button
                                 onClick={() => handleGradeCard(true)}
-                                class="py-4 px-6 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold rounded-xl transition duration-200 text-sm uppercase tracking-wider shadow"
+                                class="py-3 md:py-4 px-3 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold rounded-xl transition duration-200 text-xs md:text-sm uppercase tracking-wider shadow-sm min-h-[48px]"
                               >
                                 Got It (+1 Box)
                               </button>
@@ -818,16 +821,17 @@
 
                       </div>
 
+                      {}
                       {/* AI Utilities Panel (Available upon answers reveal) */}
                       {isRevealed && (
-                        <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm flex flex-col gap-4">
-                          <h4 class="text-xs uppercase tracking-wider font-bold text-japandi-muted">Gemini Active AI Coprocessors</h4>
+                        <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs flex flex-col gap-3">
+                          <h4 class="text-[10px] uppercase tracking-wider font-extrabold text-japandi-muted">Gemini Active AI Coprocessors</h4>
                           
-                          <div class="flex flex-wrap gap-2">
+                          <div class="flex flex-col sm:flex-row gap-2">
                             <button
                               onClick={() => handleAskAiSensei(currentActiveCard)}
                               disabled={aiSenseiLoading}
-                              class="flex-1 min-w-[150px] py-2.5 px-4 bg-japandi-paper hover:bg-japandi-border text-japandi-charcoal font-semibold text-xs rounded-lg border border-japandi-border transition duration-150 flex items-center justify-center gap-2 disabled:opacity-50"
+                              class="flex-1 py-3 px-4 bg-japandi-paper hover:bg-japandi-border text-japandi-charcoal font-bold text-xs rounded-xl border border-japandi-border transition duration-150 flex items-center justify-center gap-2 disabled:opacity-50 min-h-[44px]"
                             >
                               {aiSenseiLoading ? (
                                 <span>Consulting Sensei...</span>
@@ -840,7 +844,7 @@
                               <button
                                 onClick={() => handleSketchMnemonic(currentActiveCard)}
                                 disabled={aiMnemonicLoading}
-                                class="flex-1 min-w-[150px] py-2.5 px-4 bg-japandi-paper hover:bg-japandi-border text-japandi-charcoal font-semibold text-xs rounded-lg border border-japandi-border transition duration-150 flex items-center justify-center gap-2 disabled:opacity-50"
+                                class="flex-1 py-3 px-4 bg-japandi-paper hover:bg-japandi-border text-japandi-charcoal font-bold text-xs rounded-xl border border-japandi-border transition duration-150 flex items-center justify-center gap-2 disabled:opacity-50 min-h-[44px]"
                               >
                                 {aiMnemonicLoading ? (
                                   <span>Drawing Mnemonic...</span>
@@ -855,15 +859,15 @@
 
                     </div>
                   ) : (
-                    <div class="bg-white border border-japandi-border rounded-2xl p-12 text-center shadow-sm py-16">
-                      <div class="text-6xl mb-4">🌟</div>
-                      <h3 class="serif-font text-3xl font-extrabold text-japandi-charcoal mb-2">Workspace Cleared</h3>
-                      <p class="text-sm text-japandi-muted max-w-md mx-auto mb-8">
+                    <div class="bg-white border border-japandi-border rounded-2xl p-6 md:p-12 text-center shadow-2xs py-12 md:py-16">
+                      <div class="text-5xl md:text-6xl mb-4">🌟</div>
+                      <h3 class="serif-font text-2xl md:text-3xl font-extrabold text-japandi-charcoal mb-2">Workspace Cleared</h3>
+                      <p class="text-xs md:text-sm text-japandi-muted max-w-sm mx-auto mb-6">
                         No phrases are due for active recall right now. Take a deep breath, review your complete vocabulary list, or ingest fresh ones.
                       </p>
                       <button
                         onClick={startStudySession}
-                        class="px-6 py-3 bg-japandi-olive hover:bg-japandi-oliveHover text-white text-xs uppercase tracking-wider font-bold rounded-lg transition duration-150 shadow"
+                        class="px-5 py-3 bg-japandi-olive hover:bg-japandi-oliveHover text-white text-xs uppercase tracking-wider font-bold rounded-xl transition duration-150 shadow-xs min-h-[44px]"
                       >
                         Reset & Practice All Cards Due
                       </button>
@@ -875,20 +879,20 @@
                 <div class="flex flex-col gap-6">
                   
                   {/* Context Panel Content */}
-                  <div class="bg-[#F5F3EF] border border-japandi-border rounded-2xl p-6 shadow-inner min-h-[300px]">
-                    <h3 class="serif-font text-lg font-bold text-japandi-charcoal border-b border-japandi-border pb-3 mb-4">
+                  <div class="bg-[#F5F3EF] border border-japandi-border rounded-2xl p-5 md:p-6 shadow-inner min-h-[250px] md:min-h-[300px]">
+                    <h3 class="serif-font text-base md:text-lg font-bold text-japandi-charcoal border-b border-japandi-border pb-3 mb-4">
                       AI Sensei Explanations
                     </h3>
 
                     {aiSenseiLoading && (
-                      <div class="flex flex-col items-center justify-center py-12 text-center text-japandi-muted">
-                        <div class="w-8 h-8 border-4 border-japandi-terracotta border-t-transparent rounded-full animate-spin mb-4"></div>
-                        <p class="text-xs">Analyzing linguistics and cultural contexts...</p>
+                      <div class="flex flex-col items-center justify-center py-10 text-center text-japandi-muted">
+                        <div class="w-6 h-6 border-3 border-japandi-terracotta border-t-transparent rounded-full animate-spin mb-3"></div>
+                        <p class="text-[11px]">Analyzing linguistics and cultural contexts...</p>
                       </div>
                     )}
 
                     {!aiSenseiLoading && !aiSenseiContent && !currentActiveCard?.aiSenseiCached && (
-                      <div class="text-center py-12 text-japandi-muted">
+                      <div class="text-center py-10 text-japandi-muted">
                         <p class="text-xs italic leading-relaxed">
                           Reveal the answer on your card and click "Ask AI Sensei" to generate grammatical breakdowns, literal translations, and regional slang contexts.
                         </p>
@@ -896,17 +900,17 @@
                     )}
 
                     {!aiSenseiLoading && (aiSenseiContent || currentActiveCard?.aiSenseiCached) && (
-                      <div class="text-xs text-japandi-charcoal leading-relaxed whitespace-pre-wrap select-text max-h-[400px] overflow-y-auto pr-2">
+                      <div class="text-xs text-japandi-charcoal leading-relaxed whitespace-pre-wrap select-text max-h-[350px] overflow-y-auto pr-2">
                         {aiSenseiContent || currentActiveCard?.aiSenseiCached}
                       </div>
                     )}
                   </div>
 
                   {/* Leitner Box Schedule Reference Card */}
-                  <div class="bg-white border border-japandi-border rounded-2xl p-6">
-                    <h4 class="text-xs font-extrabold uppercase tracking-wider text-japandi-muted mb-3">Leitner Time Intervals</h4>
+                  <div class="bg-white border border-japandi-border rounded-2xl p-5 md:p-6">
+                    <h4 class="text-[10px] font-extrabold uppercase tracking-wider text-japandi-muted mb-3">Leitner Time Intervals</h4>
                     <ul class="text-xs space-y-2 text-japandi-muted">
-                      <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 1:</span> <span>Immediate Recall (0s)</span></li>
+                      <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 1:</span> <span>Immediate (0s)</span></li>
                       <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 2:</span> <span>24 Hours delay</span></li>
                       <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 3:</span> <span>3 Days delay</span></li>
                       <li class="flex justify-between border-b border-japandi-paper pb-1.5"><span class="font-bold">Box 4:</span> <span>7 Days delay</span></li>
@@ -919,52 +923,53 @@
               </div>
             )}
 
+            {}
             {/* VIEW B: VOCABULARY DATABASE BROWSER */}
             {activeTab === 'database' && (
               <div class="space-y-6">
                 
                 {/* Search, Filter & Manual Add Area */}
-                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm">
-                  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-6 border-b border-japandi-paper">
-                    <h3 class="serif-font text-xl font-extrabold text-japandi-charcoal">Quick Card Ingestion</h3>
-                    <p class="text-xs text-japandi-muted">Add individual words manually to kick off Leitner Box 1 rotation.</p>
+                <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs">
+                  <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-4 pb-4 border-b border-japandi-paper">
+                    <h3 class="serif-font text-lg md:text-xl font-extrabold text-japandi-charcoal">Quick Card Ingestion</h3>
+                    <p class="text-[11px] text-japandi-muted">Add individual words manually to kick off Box 1 rotation.</p>
                   </div>
 
-                  <form onSubmit={handleManualAdd} class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <form onSubmit={handleManualAdd} class="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
-                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Spanish phrase</label>
+                      <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">Spanish phrase</label>
                       <input
                         type="text"
                         placeholder="e.g. echar de menos"
                         value={manualSpanish}
                         onChange={(e) => setManualSpanish(e.target.value)}
-                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                        class="w-full px-3 py-2 text-xs bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive min-h-[38px]"
                       />
                     </div>
                     <div>
-                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">English translation</label>
+                      <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">English translation</label>
                       <input
                         type="text"
                         placeholder="e.g. to miss someone"
                         value={manualEnglish}
                         onChange={(e) => setManualEnglish(e.target.value)}
-                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                        class="w-full px-3 py-2 text-xs bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive min-h-[38px]"
                       />
                     </div>
-                    <div class="flex items-end gap-2">
+                    <div class="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
                       <div class="flex-grow">
-                        <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Optional context [notes]</label>
+                        <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">Context [notes]</label>
                         <input
                           type="text"
                           placeholder="e.g. Used mostly in Spain"
                           value={manualContext}
                           onChange={(e) => setManualContext(e.target.value)}
-                          class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                          class="w-full px-3 py-2 text-xs bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive min-h-[38px]"
                         />
                       </div>
                       <button
                         type="submit"
-                        class="px-4 py-2.5 bg-japandi-olive hover:bg-japandi-oliveHover text-white text-xs uppercase tracking-wider font-bold rounded-lg transition duration-150 shadow"
+                        class="px-4 py-2 bg-japandi-olive hover:bg-japandi-oliveHover text-white text-[11px] uppercase tracking-wider font-bold rounded-lg transition duration-150 shadow-xs min-h-[38px] mt-2 sm:mt-0"
                       >
                         Add
                       </button>
@@ -973,28 +978,28 @@
                 </div>
 
                 {/* Database Search Filter Controls */}
-                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm">
-                  <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs">
+                  <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
                     
                     {/* Search Field */}
                     <div class="flex-grow">
-                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Search Vocabulary Query</label>
+                      <label class="block text-[9px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Search Vocabulary Query</label>
                       <input
                         type="text"
                         placeholder="Search Spanish, English, or Context Notes..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                        class="w-full px-3.5 py-2 text-xs bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive min-h-[38px]"
                       />
                     </div>
 
                     {/* Filter Dropdown */}
                     <div class="md:w-48">
-                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Leitner Level Filter</label>
+                      <label class="block text-[9px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Leitner Level Filter</label>
                       <select
                         value={filterBox}
                         onChange={(e) => setFilterBox(e.target.value)}
-                        class="w-full px-4 py-2 text-sm bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive"
+                        class="w-full px-3.5 py-2 text-xs bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive min-h-[38px]"
                       >
                         <option value="all">All Boxes (1 - 5)</option>
                         <option value="1">Box 1 (Immediate)</option>
@@ -1008,80 +1013,79 @@
                   </div>
                 </div>
 
-                {/* Table View Component */}
-                <div class="bg-white border border-japandi-border rounded-2xl overflow-hidden shadow-sm">
+                {/* Table View Component with Swipe/Overflow Wrapper */}
+                <div class="bg-white border border-japandi-border rounded-2xl overflow-hidden shadow-2xs">
                   {filteredCards.length > 0 ? (
-                    <div class="overflow-x-auto">
-                      <table class="w-full text-left border-collapse">
+                    <div class="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+                      <table class="w-full text-left border-collapse min-w-[600px]">
                         <thead>
-                          <tr class="bg-japandi-paper border-b border-japandi-border text-[10px] uppercase tracking-wider text-japandi-muted">
-                            <th class="px-6 py-4 font-bold">Spanish Target</th>
-                            <th class="px-6 py-4 font-bold">English Meaning</th>
-                            <th class="px-6 py-4 font-bold">Context / Notes</th>
-                            <th class="px-6 py-4 font-bold text-center">Box Stage</th>
-                            <th class="px-6 py-4 font-bold text-right">Actions</th>
+                          <tr class="bg-japandi-paper border-b border-japandi-border text-[9px] uppercase tracking-wider text-japandi-muted">
+                            <th class="px-4 md:px-6 py-3.5 font-bold">Spanish Target</th>
+                            <th class="px-4 md:px-6 py-3.5 font-bold">English Meaning</th>
+                            <th class="px-4 md:px-6 py-3.5 font-bold">Context / Notes</th>
+                            <th class="px-4 md:px-6 py-3.5 font-bold text-center">Box Stage</th>
+                            <th class="px-4 md:px-6 py-3.5 font-bold text-right">Actions</th>
                           </tr>
                         </thead>
-                        <tbody class="divide-y divide-japandi-paper text-sm text-japandi-charcoal">
+                        <tbody class="divide-y divide-japandi-paper text-xs md:text-sm text-japandi-charcoal">
                           {filteredCards.map(card => {
                             const isEditing = editingCardId === card.id;
-                            const isOverdue = card.nextReview <= Date.now();
                             return (
                               <tr key={card.id} class="hover:bg-japandi-cream/50 transition duration-150">
-                                <td class="px-6 py-4 font-bold">
+                                <td class="px-4 md:px-6 py-3.5 font-bold">
                                   {isEditing ? (
                                     <input
                                       type="text"
                                       value={editSpanish}
                                       onChange={(e) => setEditSpanish(e.target.value)}
-                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded"
+                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded text-xs min-h-[30px]"
                                     />
                                   ) : (
                                     <span>{card.spanish}</span>
                                   )}
                                 </td>
-                                <td class="px-6 py-4">
+                                <td class="px-4 md:px-6 py-3.5">
                                   {isEditing ? (
                                     <input
                                       type="text"
                                       value={editEnglish}
                                       onChange={(e) => setEditEnglish(e.target.value)}
-                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded"
+                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded text-xs min-h-[30px]"
                                     />
                                   ) : (
                                     <span>{card.english}</span>
                                   )}
                                 </td>
-                                <td class="px-6 py-4 text-xs text-japandi-muted">
+                                <td class="px-4 md:px-6 py-3.5 text-xs text-japandi-muted">
                                   {isEditing ? (
                                     <input
                                       type="text"
                                       value={editContext}
                                       onChange={(e) => setEditContext(e.target.value)}
-                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded"
+                                      class="w-full px-2 py-1 bg-white border border-japandi-border rounded text-xs min-h-[30px]"
                                     />
                                   ) : (
                                     <span>{card.context || <span class="italic text-gray-300">None</span>}</span>
                                   )}
                                 </td>
-                                <td class="px-6 py-4 text-center">
-                                  <span class="inline-block px-2.5 py-1 bg-japandi-paper border border-japandi-border rounded-full font-bold text-xs">
+                                <td class="px-4 md:px-6 py-3.5 text-center">
+                                  <span class="inline-block px-2 py-0.5 bg-japandi-paper border border-japandi-border rounded-full font-bold text-[11px]">
                                     Box {card.box}
                                   </span>
                                 </td>
-                                <td class="px-6 py-4 text-right">
-                                  <div class="flex items-center justify-end gap-2">
+                                <td class="px-4 md:px-6 py-3.5 text-right">
+                                  <div class="flex items-center justify-end gap-1.5">
                                     {isEditing ? (
                                       <>
                                         <button
                                           onClick={handleSaveEdit}
-                                          class="px-3 py-1 bg-japandi-olive text-white text-xs font-bold rounded hover:bg-japandi-oliveHover"
+                                          class="px-2.5 py-1 bg-japandi-olive text-white text-[11px] font-bold rounded-lg hover:bg-japandi-oliveHover min-h-[28px]"
                                         >
                                           Save
                                         </button>
                                         <button
                                           onClick={() => setEditingCardId(null)}
-                                          class="px-3 py-1 bg-japandi-paper text-japandi-charcoal text-xs font-bold rounded border border-japandi-border hover:bg-japandi-border"
+                                          class="px-2.5 py-1 bg-japandi-paper text-japandi-charcoal text-[11px] font-bold rounded-lg border border-japandi-border hover:bg-japandi-border min-h-[28px]"
                                         >
                                           Cancel
                                         </button>
@@ -1090,13 +1094,13 @@
                                       <>
                                         <button
                                           onClick={() => handleStartEdit(card)}
-                                          class="px-2.5 py-1 bg-japandi-paper border border-japandi-border text-xs rounded hover:bg-japandi-cream text-japandi-charcoal"
+                                          class="px-2.5 py-1 bg-japandi-paper border border-japandi-border text-[11px] font-bold rounded-lg hover:bg-japandi-cream text-japandi-charcoal min-h-[28px]"
                                         >
                                           Edit
                                         </button>
                                         <button
                                           onClick={() => handleDeleteCard(card.id)}
-                                          class="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 text-xs rounded"
+                                          class="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-bold rounded-lg min-h-[28px]"
                                         >
                                           Delete
                                         </button>
@@ -1111,8 +1115,8 @@
                       </table>
                     </div>
                   ) : (
-                    <div class="text-center py-12 text-japandi-muted">
-                      <p class="text-xs">No cards match the active search criteria or Leitner Box level filter.</p>
+                    <div class="text-center py-10 text-japandi-muted text-xs">
+                      <p>No cards match the active search criteria or Leitner Box level filter.</p>
                     </div>
                   )}
                 </div>
@@ -1120,50 +1124,51 @@
               </div>
             )}
 
+            {}
             {/* VIEW C: BULK ADD & IMPORT KEEP */}
             {activeTab === 'ingest' && (
-              <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
                 
                 {/* Keep Ingestion Box */}
-                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-sm flex flex-col justify-between">
                   <div>
-                    <h3 class="serif-font text-2xl font-extrabold text-japandi-charcoal mb-2">Ingest Google Keep Checklists</h3>
-                    <p class="text-xs text-japandi-muted mb-6 leading-relaxed">
-                      Copy raw text lines directly from your Google Keep checkbox lists. The parser automatically strips checkbox markers (<code class="bg-japandi-paper px-1 rounded">[]</code>), resolves multiple dashes, isolates the Spanish target phrase, and separates bracketed context data.
+                    <h3 class="serif-font text-xl md:text-2xl font-extrabold text-japandi-charcoal mb-2">Ingest Google Keep</h3>
+                    <p class="text-xs text-japandi-muted mb-4 leading-relaxed">
+                      Copy raw text lines directly from your Google Keep checkbox lists. Satori automatically strips checkbox markers (<code class="bg-japandi-paper px-1 rounded">[]</code>), multiple dashes, and isolates the Spanish/English targets.
                     </p>
 
-                    <div class="mb-6">
-                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-2">
+                    <div class="mb-4">
+                      <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-2">
                         Paste Raw Checklist Blocks
                       </label>
                       <textarea
-                        rows="8"
-                        placeholder="[] tuve una idea- to came up with an idea&#10;[] Lo que resulta en que - which results in&#10;[] Como se come esto?  - How does that work? [¿Qué significa eso? ¿Cómo funciona eso?]"
+                        rows="6"
+                        placeholder="[] tuve una idea- to came up with an idea&#10;[] Lo que resulta en que - which results in&#10;[] Como se come esto?  - How does that work? [¿Cómo funciona eso?]"
                         value={bulkInput}
                         onChange={(e) => setBulkInput(e.target.value)}
-                        class="w-full px-4 py-3 text-xs bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive font-mono"
+                        class="w-full px-3 py-2.5 text-xs bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive font-mono"
                       ></textarea>
                     </div>
                   </div>
 
                   <button
                     onClick={handleLoadIngestData}
-                    class="w-full py-4.5 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold text-xs uppercase tracking-wider rounded-xl transition duration-150 shadow-md"
+                    class="w-full py-3.5 bg-japandi-olive hover:bg-japandi-oliveHover text-white font-bold text-xs uppercase tracking-wider rounded-xl transition duration-150 shadow-md min-h-[44px]"
                   >
                     Load & Filter Duplicate Phrases
                   </button>
                 </div>
 
                 {/* Gemini Custom Generator Card */}
-                <div class="bg-white border border-japandi-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-sm flex flex-col justify-between gap-4">
                   <div>
-                    <h3 class="serif-font text-2xl font-extrabold text-japandi-charcoal mb-2">AI Topic Deck Generator</h3>
-                    <p class="text-xs text-japandi-muted mb-6 leading-relaxed">
-                      Need specialized flashcards? Describe a specific vocabulary topic or social scenario. Google Gemini will build 8 highly-authentic expressions styled in Satori Lingo's structure directly into Box 1.
+                    <h3 class="serif-font text-xl md:text-2xl font-extrabold text-japandi-charcoal mb-2">AI Topic Deck Generator</h3>
+                    <p class="text-xs text-japandi-muted mb-4 leading-relaxed">
+                      Need specialized flashcards? Describe a specific vocabulary topic or scenario. Google Gemini will build 8 customized expressions directly into Box 1.
                     </p>
 
-                    <div class="mb-6">
-                      <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-2">
+                    <div class="mb-2">
+                      <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1.5">
                         Topic / Scenario Goal
                       </label>
                       <input
@@ -1171,23 +1176,23 @@
                         placeholder="e.g., Checking into a boutique hotel in Seville"
                         value={customTopic}
                         onChange={(e) => setCustomTopic(e.target.value)}
-                        class="w-full px-4 py-3 text-xs bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive"
+                        class="w-full px-3 py-2.5 text-xs bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive min-h-[38px]"
                       />
                       
-                      <div class="mt-4">
-                        <span class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-2">Popular Presets</span>
+                      <div class="mt-3">
+                        <span class="block text-[9px] uppercase tracking-wider font-bold text-japandi-muted mb-2">Popular Presets</span>
                         <div class="flex flex-wrap gap-1.5">
                           {[
                             "Disputing taxi fare",
-                            "Navigating restaurant allergy warnings",
-                            "Polite expressions for refusal",
-                            "Urgent Spanish medical concerns"
+                            "Allergy warnings",
+                            "Polite refusals",
+                            "Urgent medical help"
                           ].map(preset => (
                             <button
                               key={preset}
                               type="button"
                               onClick={() => setCustomTopic(preset)}
-                              class="text-[11px] bg-japandi-paper border border-japandi-border hover:bg-japandi-border px-2.5 py-1 rounded transition"
+                              class="text-[10px] bg-japandi-paper border border-japandi-border hover:bg-japandi-border px-2.5 py-1 rounded-lg transition min-h-[28px] font-medium"
                             >
                               {preset}
                             </button>
@@ -1200,7 +1205,7 @@
                   <button
                     onClick={handleGenerateTopicDeck}
                     disabled={aiGeneratingTopic || !apiKey}
-                    class="w-full py-4.5 bg-japandi-terracotta hover:bg-[#B37E70] text-white font-bold text-xs uppercase tracking-wider rounded-xl transition duration-150 shadow-md disabled:opacity-50"
+                    class="w-full py-3.5 bg-japandi-terracotta hover:bg-[#B37E70] text-white font-bold text-xs uppercase tracking-wider rounded-xl transition duration-150 shadow-md disabled:opacity-50 min-h-[44px]"
                   >
                     {aiGeneratingTopic ? "Consulting Neural Model..." : "Generate AI Custom Scenario Deck"}
                   </button>
@@ -1209,17 +1214,18 @@
               </div>
             )}
 
+            {}
             {/* VIEW D: AI SETTINGS & KEYS */}
             {activeTab === 'settings' && (
-              <div class="bg-white border border-japandi-border rounded-2xl p-8 shadow-sm max-w-2xl mx-auto">
-                <h3 class="serif-font text-2xl font-extrabold text-japandi-charcoal mb-2">AI Setup & Key Settings</h3>
+              <div class="bg-white border border-japandi-border rounded-2xl p-5 md:p-8 shadow-sm max-w-2xl mx-auto">
+                <h3 class="serif-font text-xl md:text-2xl font-extrabold text-japandi-charcoal mb-2">AI Setup & Key Settings</h3>
                 <p class="text-xs text-japandi-muted mb-6 leading-relaxed">
                   Provide your developer API Key to access generative explanations and graphic mnemonics. Your key is stored locally in your own web browser's secure memory (`localStorage`) and never exits to external databases.
                 </p>
 
                 <div class="space-y-6">
                   <div>
-                    <label class="block text-[10px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">
+                    <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1.5">
                       Gemini API Key (Google AI Studio)
                     </label>
                     <input
@@ -1227,7 +1233,7 @@
                       placeholder="Paste your AIzaSy... developer key"
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
-                      class="w-full px-4 py-3 text-sm bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive font-mono"
+                      class="w-full px-4 py-3 text-xs md:text-sm bg-japandi-cream border border-japandi-border rounded-xl focus:outline-none focus:border-japandi-olive font-mono"
                     />
                     <span class="block text-[10px] text-japandi-muted mt-2">
                       Get a 100% free developer credential key from the official portal at <a href="https://aistudio.google.com" target="_blank" class="underline text-japandi-terracotta font-semibold">aistudio.google.com</a>.
@@ -1235,12 +1241,12 @@
                   </div>
 
                   <div class="pt-6 border-t border-japandi-paper">
-                    <h4 class="serif-font text-lg font-bold text-japandi-charcoal mb-2 text-red-700">Database Administration</h4>
+                    <h4 class="serif-font text-base md:text-lg font-bold text-japandi-charcoal mb-2 text-red-700">Database Administration</h4>
                     <p class="text-xs text-japandi-muted mb-4">Wipe your vocabulary data, cached images, and resets system tracking statistics.</p>
                     
                     <button
                       onClick={handleClearAllData}
-                      class="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs uppercase tracking-wider font-bold rounded-lg transition duration-150 shadow"
+                      class="px-4 py-3 bg-red-600 hover:bg-red-700 text-white text-xs uppercase tracking-wider font-bold rounded-xl transition duration-150 shadow-xs min-h-[40px]"
                     >
                       Clear All Flashcard Data
                     </button>
@@ -1251,8 +1257,9 @@
 
           </main>
 
-          {/* Core Footer Info & Setup Assistance */}
-          <footer class="mt-12 pt-6 border-t border-japandi-border text-center flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-japandi-muted">
+          {}
+          {/* Core Footer Info */}
+          <footer class="mt-12 pt-5 border-t border-japandi-border text-center flex flex-col md:flex-row items-center justify-between gap-3 text-[11px] text-japandi-muted">
             <p>© 2026 Satori Lingo Workspace. Silent Leitner Box Mode.</p>
             <p>Runs entirely offline in browser • State managed via localStorage</p>
           </footer>
