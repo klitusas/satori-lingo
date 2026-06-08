@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <!-- Viewport meta tag optimized for touch scale control -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Satori Lingo — Spaced Repetition Workspace</title>
   
   <!-- Tailwind CSS -->
@@ -44,41 +43,127 @@
   <style>
     body {
       font-family: 'Plus Jakarta Sans', sans-serif;
-      /* Prevent elastic bounce-scrolling anomalies on mobile webview platforms */
-      overscroll-behavior-y: contain;
     }
     h1, h2, h3, .serif-font {
       font-family: 'Playfair Display', serif;
     }
-    /* Hide scrollbars for ultra-clean mobile navigation sliders */
-    .scrollbar-none::-webkit-scrollbar {
-      display: none;
-    }
-    .scrollbar-none {
-      -ms-overflow-style: none;  /* IE and Edge */
-      scrollbar-width: none;  /* Firefox */
-    }
-    /* Optimized system scrollbars for desktop */
+    /* Hide scrollbar for clean aesthetic */
     ::-webkit-scrollbar {
-      width: 5px;
-      height: 5px;
+      width: 6px;
+      height: 6px;
     }
     ::-webkit-scrollbar-track {
       background: #F5F3EF;
     }
     ::-webkit-scrollbar-thumb {
       background: #C28C7E;
-      border-radius: 4px;
+      border-radius: 3px;
+    }
+
+    /* Secure, high-performance keyframes that don't depend on external Lottie files */
+    .animate-float {
+      animation: float 4s ease-in-out infinite;
+    }
+    .animate-pulse-ring {
+      animation: pulseRing 3s ease-in-out infinite;
+      transform-origin: center;
+    }
+    .animate-spin-slow {
+      animation: spin 10s linear infinite;
+    }
+    .animate-sway {
+      animation: sway 6s ease-in-out infinite;
+      transform-origin: center;
+    }
+    .animate-sway-heavy {
+      animation: swayHeavy 5s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-12px); }
+    }
+    @keyframes pulseRing {
+      0%, 100% { transform: scale(0.94); opacity: 0.7; }
+      50% { transform: scale(1.06); opacity: 1; }
+    }
+    @keyframes sway {
+      0%, 100% { transform: rotate(-2deg) translateY(0); }
+      50% { transform: rotate(2deg) translateY(-2px); }
+    }
+    @keyframes swayHeavy {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      50% { transform: translate(-3px, -3px) rotate(8deg); }
     }
   </style>
 </head>
-<body class="bg-japandi-cream text-japandi-charcoal min-h-screen antialiased">
+<body class="bg-japandi-cream text-japandi-charcoal min-h-screen">
 
   <div id="root"></div>
 
   <!-- React Application Source Code -->
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
+
+    // --- STREAMING_CHUNK: Declaring custom inline animated SVG components ---
+    
+    // SVG 1: Zen garden sun rising over raked sand waves for complete reviews
+    const ZenClearedAnimation = () => (
+      <div className="w-48 h-48 flex items-center justify-center relative select-none">
+        <svg viewBox="0 0 200 200" className="w-full h-full">
+          {/* Background boundary */}
+          <circle cx="100" cy="100" r="80" fill="#F5F3EF" stroke="#E3DFD5" strokeWidth="2" strokeDasharray="4 4" />
+          
+          {/* Warm terracotta sun rising (gently pulsing) */}
+          <circle cx="100" cy="90" r="30" fill="#C28C7E" className="animate-pulse" style={{ animationDuration: '4s' }} />
+          
+          {/* Raked concentric sand waves (swaying smoothly) */}
+          <path d="M 40 135 Q 70 120 100 135 T 160 135" fill="none" stroke="#4F5D4E" strokeWidth="3" strokeLinecap="round" className="animate-sway" />
+          <path d="M 40 148 Q 70 133 100 148 T 160 148" fill="none" stroke="#7A756B" strokeWidth="2" strokeLinecap="round" opacity="0.5" />
+          
+          {/* Little Zen floating stars */}
+          <path d="M 60 60 L 62 65 L 67 67 L 62 69 L 60 74 L 58 69 L 53 67 L 58 65 Z" fill="#C28C7E" className="animate-float" style={{ animationDelay: '0.5s' }} />
+          <path d="M 145 55 L 147 58 L 151 60 L 147 62 L 145 65 L 143 62 L 139 60 L 143 58 Z" fill="#4F5D4E" className="animate-float" style={{ animationDelay: '1.5s' }} />
+        </svg>
+      </div>
+    );
+
+    // SVG 2: Concentric flower circles for AI thinking loads
+    const SenseiLoaderAnimation = () => (
+      <div className="w-24 h-24 flex items-center justify-center relative select-none">
+        <svg viewBox="0 0 100 100" className="w-full h-full">
+          <circle cx="50" cy="50" r="40" fill="none" stroke="#E3DFD5" strokeWidth="2" />
+          <circle cx="50" cy="50" r="28" fill="none" stroke="#C28C7E" strokeWidth="2.5" className="animate-pulse-ring" />
+          <g className="animate-spin-slow origin-center" style={{ transformOrigin: '50px 50px' }}>
+            <circle cx="50" cy="20" r="4.5" fill="#4F5D4E" />
+            <circle cx="50" cy="80" r="4.5" fill="#4F5D4E" />
+            <circle cx="20" cy="50" r="4.5" fill="#4F5D4E" />
+            <circle cx="80" cy="50" r="4.5" fill="#4F5D4E" />
+          </g>
+        </svg>
+      </div>
+    );
+
+    // SVG 3: Document and swaying magnifier lens for search empty states
+    const SearchEmptyAnimation = () => (
+      <div className="w-32 h-32 flex items-center justify-center relative select-none">
+        <svg viewBox="0 0 120 120" className="w-full h-full">
+          {/* Background document board */}
+          <g className="animate-float">
+            <rect x="35" y="20" width="50" height="65" rx="5" fill="#F5F3EF" stroke="#E3DFD5" strokeWidth="2" />
+            <line x1="45" y1="35" x2="75" y2="35" stroke="#7A756B" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
+            <line x1="45" y1="47" x2="65" y2="47" stroke="#7A756B" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
+            <line x1="45" y1="59" x2="75" y2="59" stroke="#7A756B" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
+          </g>
+          {/* Swaying magnifier glass */}
+          <g className="animate-sway-heavy" style={{ transformOrigin: '75px 75px' }}>
+            <circle cx="75" cy="72" r="12" fill="none" stroke="#C28C7E" strokeWidth="2.5" />
+            <line x1="84" y1="81" x2="95" y2="92" stroke="#C28C7E" strokeWidth="3" strokeLinecap="round" />
+          </g>
+        </svg>
+      </div>
+    );
+
 
     // Default Starting Vocabulary to populate on first run
     const INITIAL_VOCABULARY = [
@@ -626,7 +711,6 @@
             </div>
           )}
 
-          {}
           {/* Brand Header */}
           <header class="flex flex-col md:flex-row items-stretch md:items-center justify-between border-b border-japandi-border pb-5 mb-6 md:mb-8 gap-4">
             <div>
@@ -655,7 +739,6 @@
             </div>
           </header>
 
-          {}
           {/* Leitner Box Status Grid Tracker */}
           <section class="mb-6 md:mb-8 bg-white border border-japandi-border rounded-xl p-3 md:p-4 shadow-2xs">
             <h3 class="text-[10px] uppercase tracking-wider text-japandi-muted font-extrabold mb-3 flex items-center justify-between">
@@ -681,7 +764,6 @@
             </div>
           </section>
 
-          {}
           {/* Workspace Navigation Tabs with Mobile Touch-slide */}
           <nav class="flex border-b border-japandi-border mb-6 md:mb-8 gap-2 overflow-x-auto scrollbar-none whitespace-nowrap -mx-4 px-4 md:mx-0 md:px-0">
             <button
@@ -779,7 +861,7 @@
 
                               {/* Persistent Image Cache */}
                               {currentActiveCard.aiMnemonicCached && (
-                                <div class="mt-4 flex flex-col items-center">
+                                <div class="mt-4 flex flex-col items-center animate-float">
                                   <span class="text-[9px] uppercase tracking-widest text-japandi-muted block mb-2 font-bold">Memory Trigger Sketch</span>
                                   <img 
                                     src={currentActiveCard.aiMnemonicCached} 
@@ -821,7 +903,6 @@
 
                       </div>
 
-                      {}
                       {/* AI Utilities Panel (Available upon answers reveal) */}
                       {isRevealed && (
                         <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs flex flex-col gap-3">
@@ -859,8 +940,9 @@
 
                     </div>
                   ) : (
-                    <div class="bg-white border border-japandi-border rounded-2xl p-6 md:p-12 text-center shadow-2xs py-12 md:py-16">
-                      <div class="text-5xl md:text-6xl mb-4">🌟</div>
+                    <div class="bg-white border border-japandi-border rounded-2xl p-6 md:p-12 text-center shadow-2xs py-10 md:py-14 flex flex-col items-center">
+                      {/* Robust CSS-Animated Zen Garden Scene instead of broken Lottie link */}
+                      <ZenClearedAnimation />
                       <h3 class="serif-font text-2xl md:text-3xl font-extrabold text-japandi-charcoal mb-2">Workspace Cleared</h3>
                       <p class="text-xs md:text-sm text-japandi-muted max-w-sm mx-auto mb-6">
                         No phrases are due for active recall right now. Take a deep breath, review your complete vocabulary list, or ingest fresh ones.
@@ -879,15 +961,16 @@
                 <div class="flex flex-col gap-6">
                   
                   {/* Context Panel Content */}
-                  <div class="bg-[#F5F3EF] border border-japandi-border rounded-2xl p-5 md:p-6 shadow-inner min-h-[250px] md:min-h-[300px]">
-                    <h3 class="serif-font text-base md:text-lg font-bold text-japandi-charcoal border-b border-japandi-border pb-3 mb-4">
+                  <div class="bg-[#F5F3EF] border border-japandi-border rounded-2xl p-5 md:p-6 shadow-inner min-h-[250px] md:min-h-[300px] flex flex-col">
+                    <h3 class="serif-font text-base md:text-lg font-bold text-japandi-charcoal border-b border-japandi-border pb-3 mb-4 shrink-0">
                       AI Sensei Explanations
                     </h3>
 
                     {aiSenseiLoading && (
-                      <div class="flex flex-col items-center justify-center py-10 text-center text-japandi-muted">
-                        <div class="w-6 h-6 border-3 border-japandi-terracotta border-t-transparent rounded-full animate-spin mb-3"></div>
-                        <p class="text-[11px]">Analyzing linguistics and cultural contexts...</p>
+                      <div class="flex-grow flex flex-col items-center justify-center text-center py-6 text-japandi-muted">
+                        {/* Elegant CSS Pulsing Concentration Loader instead of CORS-blocked Lottie link */}
+                        <SenseiLoaderAnimation />
+                        <p class="text-[11px] font-medium">Analyzing linguistics and cultural contexts...</p>
                       </div>
                     )}
 
@@ -923,7 +1006,6 @@
               </div>
             )}
 
-            {}
             {/* VIEW B: VOCABULARY DATABASE BROWSER */}
             {activeTab === 'database' && (
               <div class="space-y-6">
@@ -1115,7 +1197,9 @@
                       </table>
                     </div>
                   ) : (
-                    <div class="text-center py-10 text-japandi-muted text-xs">
+                    <div class="text-center py-10 text-japandi-muted text-xs flex flex-col items-center">
+                      {/* Elegant Swaying Lens search loader instead of broken Lottie link */}
+                      <SearchEmptyAnimation />
                       <p>No cards match the active search criteria or Leitner Box level filter.</p>
                     </div>
                   )}
@@ -1124,7 +1208,6 @@
               </div>
             )}
 
-            {}
             {/* VIEW C: BULK ADD & IMPORT KEEP */}
             {activeTab === 'ingest' && (
               <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
@@ -1214,7 +1297,6 @@
               </div>
             )}
 
-            {}
             {/* VIEW D: AI SETTINGS & KEYS */}
             {activeTab === 'settings' && (
               <div class="bg-white border border-japandi-border rounded-2xl p-5 md:p-8 shadow-sm max-w-2xl mx-auto">
@@ -1257,7 +1339,6 @@
 
           </main>
 
-          {}
           {/* Core Footer Info */}
           <footer class="mt-12 pt-5 border-t border-japandi-border text-center flex flex-col md:flex-row items-center justify-between gap-3 text-[11px] text-japandi-muted">
             <p>© 2026 Satori Lingo Workspace. Silent Leitner Box Mode.</p>
