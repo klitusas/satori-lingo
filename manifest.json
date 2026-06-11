@@ -3,7 +3,7 @@
   "name": "Satori Lingo — Spaced Repetition Workspace",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/3898/3898082.png",
+      "src": "https://cdn-icons-png.flaticon.com/192/3898/3898082.png",
       "type": "image/png",
       "sizes": "192x192"
     },
@@ -17,5 +17,21 @@
   "background_color": "#FAF9F6",
   "theme_color": "#4F5D4E",
   "display": "standalone",
-  "orientation": "portrait-primary"
+  "orientation": "portrait-primary",
+  "screenshots": [
+    {
+      "src": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1280&auto=format&fit=crop&q=60",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Satori Lingo Desktop Workspace"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=720&auto=format&fit=crop&q=60",
+      "sizes": "720://1280",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Satori Lingo Mobile Review"
+    }
+  ]
 }
