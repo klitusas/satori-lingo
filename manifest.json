@@ -1,0 +1,21 @@
+{
+  "short_name": "SatoriLingo",
+  "name": "Satori Lingo — Spaced Repetition Workspace",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#FAF9F6",
+  "theme_color": "#4F5D4E",
+  "display": "standalone",
+  "orientation": "portrait-primary"
+}
