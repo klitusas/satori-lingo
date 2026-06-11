@@ -226,7 +226,8 @@
         const now = Date.now();
         return flashcards
           .filter(card => card.nextReview <= now)
-          .sort((a, b) => a.box - b.box);
+          // Sort by the oldest nextReview timestamp (most overdue first)
+          .sort((a, b) => a.nextReview - b.nextReview); 
       }, [flashcards]);
 
       const boxStats = useMemo(() => {
