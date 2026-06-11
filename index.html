@@ -96,7 +96,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo } = React;
 
     // --- Inline Animated SVG Components ---
     const ZenClearedAnimation = () => (
@@ -160,6 +160,21 @@
       5: 14 * 24 * 60 * 60 * 1000
     };
 
+    // Helper utility to turn milliseconds into short readable strings
+    const formatTimeRemaining = (targetTime) => {
+      const diff = targetTime - Date.now();
+      if (diff <= 0) return "Overdue";
+      
+      const mins = Math.ceil(diff / (60 * 1000));
+      if (mins < 60) return `In ${mins}m`;
+      
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `In ${hrs}h`;
+      
+      const days = Math.floor(hrs / 24);
+      return `In ${days}d`;
+    };
+
     function App() {
       // --- Persistent App States ---
       const [flashcards, setFlashcards] = useState(() => {
@@ -192,6 +207,7 @@
       // --- Card Search & Filters ---
       const [searchQuery, setSearchQuery] = useState('');
       const [filterBox, setFilterBox] = useState('all');
+      const [filterStatus, setFilterStatus] = useState('all'); // 'all' | 'overdue' | 'resting'
       const [editingCardId, setEditingCardId] = useState(null);
       const [editSpanish, setEditSpanish] = useState('');
       const [editEnglish, setEditEnglish] = useState('');
@@ -205,6 +221,13 @@
       // --- Custom Notifications / Overlays ---
       const [toast, setToast] = useState(null);
       const [customConfirm, setCustomConfirm] = useState(null);
+
+      // --- Live Clock Reference to force countdown updates ---
+      const [timeTick, setTimeTick] = useState(Date.now());
+      useEffect(() => {
+        const interval = setInterval(() => setTimeTick(Date.now()), 30000); // refresh metadata markers every 30s
+        return () => clearInterval(interval);
+      }, []);
 
       // --- Synchronize with LocalStorage ---
       useEffect(() => {
@@ -226,17 +249,29 @@
         const now = Date.now();
         return flashcards
           .filter(card => card.nextReview <= now)
-          // Sort by the oldest nextReview timestamp (most overdue first)
-          .sort((a, b) => a.nextReview - b.nextReview); 
+          // Bulletproof priority: Sort strictly by how long a card has been overdue
+          .sort((a, b) => a.nextReview - b.nextReview);
       }, [flashcards]);
 
       const boxStats = useMemo(() => {
-        const stats = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        const now = Date.now();
+        const stats = {
+          1: { total: 0, overdue: 0 },
+          2: { total: 0, overdue: 0 },
+          3: { total: 0, overdue: 0 },
+          4: { total: 0, overdue: 0 },
+          5: { total: 0, overdue: 0 }
+        };
         flashcards.forEach(card => {
-          if (stats[card.box] !== undefined) stats[card.box]++;
+          if (stats[card.box] !== undefined) {
+            stats[card.box].total++;
+            if (card.nextReview <= now) {
+              stats[card.box].overdue++;
+            }
+          }
         });
         return stats;
-      }, [flashcards]);
+      }, [flashcards, timeTick]);
 
       // --- Initialize Study Session ---
       const startStudySession = () => {
@@ -532,7 +567,7 @@
         const calculatedInterval = BOX_INTERVALS[newBox];
         const nextReviewTimestamp = Date.now() + calculatedInterval;
 
-        // 1. Permanently modify the global database array state
+        // 1. Modify the global structural data store
         setFlashcards(prev =>
           prev.map(c =>
             c.id === currentCard.id
@@ -541,7 +576,7 @@
           )
         );
 
-        // 2. Schedule dynamic runtime pipeline extensions without wiping the workspace tracker
+        // 2. Schedule session loops safely without triggering tracking clears
         if (!gotIt) {
           const updatedCardWithReset = { ...currentCard, box: 1, nextReview: Date.now() };
           setSessionCards(prev => [...prev, updatedCardWithReset]);
@@ -550,7 +585,6 @@
           triggerToast(`Advanced to Box ${newBox}! Scheduled for future study.`, "success");
         }
 
-        // 3. Increment pointer cleanly to step onto the next index target
         setIsRevealed(false);
         setAiSenseiContent(null);
         setCurrentIndex(prev => prev + 1);
@@ -639,8 +673,9 @@
         });
       };
 
-      // --- Filtered Database Query Engine ---
+      // --- Filtered Database Query Engine with Live Urgency Calculation ---
       const filteredCards = useMemo(() => {
+        const now = Date.now();
         return flashcards.filter(card => {
           const query = searchQuery.toLowerCase();
           const matchesSearch =
@@ -649,10 +684,15 @@
             (card.context && card.context.toLowerCase().includes(query));
 
           const matchesBox = filterBox === 'all' || card.box.toString() === filterBox;
+          
+          let matchesStatus = true;
+          const isOverdue = card.nextReview <= now;
+          if (filterStatus === 'overdue') matchesStatus = isOverdue;
+          if (filterStatus === 'resting') matchesStatus = !isOverdue;
 
-          return matchesSearch && matchesBox;
+          return matchesSearch && matchesBox && matchesStatus;
         });
-      }, [flashcards, searchQuery, filterBox]);
+      }, [flashcards, searchQuery, filterBox, filterStatus, timeTick]);
 
       const currentActiveCard = sessionCards[currentIndex];
       const cardsRemainingInSession = Math.max(0, sessionCards.length - currentIndex);
@@ -719,23 +759,37 @@
             </div>
           </header>
 
-          {/* Leitner Box Status Grid Tracker */}
+          {/* Leitner Box Status Grid Tracker with Overdue Breakdown */}
           <section class="mb-6 md:mb-8 bg-white border border-japandi-border rounded-xl p-3 md:p-4 shadow-2xs">
             <h3 class="text-[10px] uppercase tracking-wider text-japandi-muted font-extrabold mb-3 flex items-center justify-between">
-              <span>Leitner Progression (Box 1 to 5)</span>
-              <span class="hidden md:inline text-[11px] normal-case italic font-normal text-japandi-terracotta">Higher boxes schedule intervals up to 14 days</span>
+              <span>Leitner Progression (Live Overdue Audit)</span>
+              <span class="hidden md:inline text-[11px] normal-case italic font-normal text-japandi-terracotta">Colored dots show items ready to recall right now</span>
             </h3>
             <div class="grid grid-cols-5 gap-1.5 md:gap-2">
               {[1, 2, 3, 4, 5].map(boxNum => {
-                const count = boxStats[boxNum] || 0;
-                const percentage = flashcards.length > 0 ? (count / flashcards.length) * 100 : 0;
+                const stat = boxStats[boxNum] || { total: 0, overdue: 0 };
+                const percentage = flashcards.length > 0 ? (stat.total / flashcards.length) * 100 : 0;
+                const restingCount = stat.total - stat.overdue;
                 return (
                   <div key={boxNum} class="bg-japandi-cream border border-japandi-border p-1.5 md:p-3 rounded-xl flex flex-col justify-between items-center text-center">
                     <span class="text-[9px] md:text-[10px] font-bold text-japandi-muted">
-                      <span class="md:hidden">B</span><span class="hidden md:inline">Box </span>{boxNum}
+                      Box {boxNum}
                     </span>
-                    <span class="text-sm md:text-lg font-extrabold text-japandi-charcoal my-0.5 md:my-1">{count}</span>
-                    <div class="w-full bg-japandi-paper rounded-full h-1 mt-1 overflow-hidden">
+                    <span class="text-sm md:text-lg font-extrabold text-japandi-charcoal my-0.5 md:my-1">
+                      {stat.total}
+                    </span>
+                    
+                    {/* Visual Status Pills */}
+                    <div class="flex flex-col gap-0.5 w-full text-[8px] md:text-[10px] font-medium mt-0.5 mb-1.5">
+                      <span class="px-1 py-0.5 rounded bg-japandi-terracotta/10 text-japandi-terracotta">
+                        🚨 {stat.overdue} due
+                      </span>
+                      <span class="px-1 py-0.5 rounded bg-japandi-olive/10 text-japandi-olive">
+                        ⏳ {restingCount} sleep
+                      </span>
+                    </div>
+
+                    <div class="w-full bg-japandi-paper rounded-full h-1 overflow-hidden">
                       <div class="bg-japandi-olive h-1" style={{ width: `${percentage}%` }}></div>
                     </div>
                   </div>
@@ -930,9 +984,8 @@
                   )}
                 </div>
 
-                {/* Right side: AI Explanation Output & Context Notes */}
+                {/* Right side: AI Explanation Output */}
                 <div class="flex flex-col gap-6">
-                  
                   <div class="bg-[#F5F3EF] border border-japandi-border rounded-2xl p-5 md:p-6 shadow-inner min-h-[250px] md:min-h-[300px] flex flex-col">
                     <h3 class="serif-font text-base md:text-lg font-bold text-japandi-charcoal border-b border-japandi-border pb-3 mb-4 shrink-0">
                       AI Sensei Explanations
@@ -970,13 +1023,12 @@
                       <li class="flex justify-between pb-0.5"><span class="font-bold">Box 5:</span> <span>14 Days delay</span></li>
                     </ul>
                   </div>
-
                 </div>
 
               </div>
             )}
 
-            {/* VIEW B: VOCABULARY DATABASE BROWSER */}
+            {/* VIEW B: VOCABULARY DATABASE BROWSER WITH LIVE countdown CONTROLS */}
             {activeTab === 'database' && (
               <div class="space-y-6">
                 
@@ -1028,10 +1080,11 @@
                   </form>
                 </div>
 
+                {/* Multilayer Filtration Suite */}
                 <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs">
-                  <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
                     
-                    <div class="flex-grow">
+                    <div>
                       <label class="block text-[9px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Search Vocabulary Query</label>
                       <input
                         type="text"
@@ -1042,7 +1095,7 @@
                       />
                     </div>
 
-                    <div class="md:w-48">
+                    <div>
                       <label class="block text-[9px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Leitner Level Filter</label>
                       <select
                         value={filterBox}
@@ -1058,6 +1111,19 @@
                       </select>
                     </div>
 
+                    <div>
+                      <label class="block text-[9px] uppercase tracking-wider font-bold text-japandi-muted mb-1.5">Live Spacing Status Filter</label>
+                      <select
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                        class="w-full px-3.5 py-2 text-xs bg-japandi-cream border border-japandi-border rounded-lg focus:outline-none focus:border-japandi-olive min-h-[38px]"
+                      >
+                        <option value="all">Show All Words</option>
+                        <option value="overdue">🚨 Overdue Only (Due to Study)</option>
+                        <option value="resting">⏳ Resting Only (Cooling Down)</option>
+                      </select>
+                    </div>
+
                   </div>
                 </div>
 
@@ -1070,13 +1136,14 @@
                             <th class="px-4 md:px-6 py-3.5 font-bold">Spanish Target</th>
                             <th class="px-4 md:px-6 py-3.5 font-bold">English Meaning</th>
                             <th class="px-4 md:px-6 py-3.5 font-bold">Context / Notes</th>
-                            <th class="px-4 md:px-6 py-3.5 font-bold text-center">Box Stage</th>
+                            <th class="px-4 md:px-6 py-3.5 font-bold text-center">Interval Status</th>
                             <th class="px-4 md:px-6 py-3.5 font-bold text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody class="divide-y divide-japandi-paper text-xs md:text-sm text-japandi-charcoal">
                           {filteredCards.map(card => {
                             const isEditing = editingCardId === card.id;
+                            const currentOverdueStatus = card.nextReview <= Date.now();
                             return (
                               <tr key={card.id} class="hover:bg-japandi-cream/50 transition duration-150">
                                 <td class="px-4 md:px-6 py-3.5 font-bold">
@@ -1115,10 +1182,19 @@
                                     <span>{card.context || <span class="italic text-gray-300">None</span>}</span>
                                   )}
                                 </td>
-                                <td class="px-4 md:px-6 py-3.5 text-center">
-                                  <span class="inline-block px-2 py-0.5 bg-japandi-paper border border-japandi-border rounded-full font-bold text-[11px]">
-                                    Box {card.box}
-                                  </span>
+                                <td class="px-4 md:px-6 py-3.5 text-center whitespace-nowrap">
+                                  <div class="flex flex-col items-center gap-0.5">
+                                    <span class="inline-block px-2 py-0.5 bg-japandi-paper border border-japandi-border rounded-full font-bold text-[11px]">
+                                      Box {card.box}
+                                    </span>
+                                    <span class={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                      currentOverdueStatus 
+                                        ? 'bg-red-50 text-red-700 border border-red-200' 
+                                        : 'bg-japandi-olive/10 text-japandi-olive'
+                                    }`}>
+                                      {currentOverdueStatus ? "🚨 Overdue" : `⏳ ${formatTimeRemaining(card.nextReview)}`}
+                                    </span>
+                                  </div>
                                 </td>
                                 <td class="px-4 md:px-6 py-3.5 text-right">
                                   <div class="flex items-center justify-end gap-1.5">
@@ -1164,7 +1240,7 @@
                   ) : (
                     <div class="text-center py-10 text-japandi-muted text-xs flex flex-col items-center">
                       <SearchEmptyAnimation />
-                      <p>No cards match the active search criteria or Leitner Box level filter.</p>
+                      <p>No cards match the active filter configurations.</p>
                     </div>
                   )}
                 </div>
@@ -1175,7 +1251,6 @@
             {/* VIEW C: BULK ADD & IMPORT KEEP */}
             {activeTab === 'ingest' && (
               <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-                
                 <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-sm flex flex-col justify-between">
                   <div>
                     <h3 class="serif-font text-xl md:text-2xl font-extrabold text-japandi-charcoal mb-2">Ingest Google Keep</h3>
