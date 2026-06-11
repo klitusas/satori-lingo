@@ -3,13 +3,13 @@
   "name": "Satori Lingo — Spaced Repetition Workspace",
   "icons": [
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192' fill='%234F5D4E'><circle cx='96' cy='96' r='80'/><circle cx='96' cy='86' r='30' fill='%23C28C7E'/></svg>",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgZmlsbD0iIzRGNUQ0RSIgcng9IjI0Ii8+PGNpcmNsZSBjeD0iOTYiIGN5PSI5NiIgcj0iNDAiIGZpbGw9IiNDMjhDN0UiLz48L3N2Zz4=",
       "type": "image/svg+xml",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%234F5D4E'><circle cx='256' cy='256' r='200'/><circle cx='256' cy='230' r='80' fill='%23C28C7E'/></svg>",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzRGNUQ0RSIgcng9IjY0Ii8+PGNpcmNsZSBjeD0iMjU2IiBjeT0iMjU2IiByPSIxMDQiIGZpbGw9IiNDMjhDN0UiLz48L3N2Zz4=",
       "type": "image/svg+xml",
       "sizes": "512x512",
       "purpose": "any"
@@ -22,14 +22,14 @@
   "orientation": "portrait-primary",
   "screenshots": [
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1280' height='720' viewBox='0 0 1280 720'><rect width='100%'' height='100%' fill='%23F5F3EF'/><text x='50%' y='50%' font-family='serif' font-size='48' fill='%232D2D2D' text-anchor='middle'>Satori Lingo Desktop Workspace</text></svg>",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjgwIiBoZWlnaHQ9IjcyMCIgdmlld0JveD0iMCAwIDEyODAgNzIwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjRjVGM0VGIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzZXJpZiIgZm9udC1zaXplPSI0OCIgZmlsbD0iIzJEMkQyRCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+U2F0b3JpIExpbmdvIERlc2t0b3AgV29ya3NwYWNlPC90ZXh0Pjwvc3ZnPg==",
       "sizes": "1280x720",
       "type": "image/svg+xml",
       "form_factor": "wide",
       "label": "Satori Lingo Desktop Workspace"
     },
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='720' height='1280' viewBox='0 0 720 1280'><rect width='100%'' height='100%' fill='%23F5F3EF'/><text x='50%' y='50%' font-family='serif' font-size='36' fill='%232D2D2D' text-anchor='middle'>Satori Lingo Mobile Review</text></svg>",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MjAiIGhlaWdodD0iMTI4MCIgdmlld0JveD0iMCAwIDcyMCAxMjgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjRjVGM0VGIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzZXJpZiIgZm9udC1zaXplPSIzNiIgZmlsbD0iIzJEMkQyRCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+U2F0b3JpIExpbmdvIE1vYmlsZSBSZXZpZXc8L3RleHQ+PC9zdmc+",
       "sizes": "720x1280",
       "type": "image/svg+xml",
       "form_factor": "narrow",
