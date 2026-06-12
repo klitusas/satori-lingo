@@ -102,7 +102,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     // --- Inline Animated SVG Components ---
     const ZenClearedAnimation = () => (
@@ -217,6 +217,7 @@
 
       const [toast, setToast] = useState(null);
       const [customConfirm, setCustomConfirm] = useState(null);
+      const fileInputRef = useRef(null);
 
       const [timeTick, setTimeTick] = useState(Date.now());
       useEffect(() => {
@@ -280,6 +281,76 @@
           startStudySession();
         }
       }, [activeTab]);
+
+      // --- Database Export Logic Engine ---
+      const handleExportJSON = () => {
+        try {
+          const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(flashcards, null, 2));
+          const downloadAnchor = document.createElement('a');
+          downloadAnchor.setAttribute("href", dataStr);
+          downloadAnchor.setAttribute("download", `satori_lingo_backup_${new Date().toISOString().slice(0,10)}.json`);
+          document.body.appendChild(downloadAnchor);
+          downloadAnchor.click();
+          downloadAnchor.remove();
+          triggerToast("Vocabulary database backup exported successfully!", "success");
+        } catch (err) {
+          console.error(err);
+          triggerToast("Failed to compile database export file asset.", "error");
+        }
+      };
+
+      // --- Database Import Logic Engine ---
+      const handleImportJSON = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const parsedData = JSON.parse(event.target.result);
+            if (!Array.isArray(parsedData)) {
+              triggerToast("Import failed: Backup file formatting must be a valid array.", "error");
+              return;
+            }
+
+            let insertedCount = 0;
+            let duplicateCount = 0;
+            const absoluteDeckCopy = [...flashcards];
+
+            parsedData.forEach(incomingCard => {
+              if (!incomingCard.spanish || !incomingCard.english) return;
+
+              const collisionDetected = absoluteDeckCopy.some(
+                existing => existing.spanish.toLowerCase().trim() === incomingCard.spanish.toLowerCase().trim()
+              );
+
+              if (!collisionDetected) {
+                absoluteDeckCopy.push({
+                  id: incomingCard.id || Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                  spanish: incomingCard.spanish.trim(),
+                  english: incomingCard.english.trim(),
+                  context: incomingCard.context ? incomingCard.context.trim() : null,
+                  box: typeof incomingCard.box === 'number' ? Math.max(1, Math.min(5, incomingCard.box)) : 1,
+                  nextReview: typeof incomingCard.nextReview === 'number' ? incomingCard.nextReview : Date.now(),
+                  aiSenseiCached: incomingCard.aiSenseiCached || null,
+                  aiMnemonicCached: incomingCard.aiMnemonicCached || null
+                });
+                insertedCount++;
+              } else {
+                duplicateCount++;
+              }
+            });
+
+            setFlashcards(absoluteDeckCopy);
+            triggerToast(`Import completed. Added ${insertedCount} items. (Skipped ${duplicateCount} duplicates)`, "success");
+            if (fileInputRef.current) fileInputRef.current.value = ''; // Clean field reference
+          } catch (parseErr) {
+            console.error(parseErr);
+            triggerToast("Failed to parse JSON file structure. Verify syntax integrity.", "error");
+          }
+        };
+        reader.readAsText(file);
+      };
 
       const callGeminiAPI = async (endpoint, payload, retries = 5, delay = 1000) => {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${endpoint}?key=${apiKey}`;
@@ -876,29 +947,65 @@
               </div>
             )}
 
-            {/* VIEW B: VOCABULARY DATABASE BROWSER */}
+            {/* VIEW B: VOCABULARY DATABASE BROWSER WITH NATIVE IMPORT / EXPORT PANELS */}
             {activeTab === 'database' && (
               <div class="space-y-6">
-                <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs">
-                  <form onSubmit={handleManualAdd} class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">Spanish phrase</label>
-                      <input type="text" placeholder="e.g. echar de menos" value={manualSpanish} onChange={(e) => setManualSpanish(e.target.value)} class="w-full px-3 py-2 text-xs bg-japandi-cream border rounded-lg focus:outline-none min-h-[38px]" />
-                    </div>
-                    <div>
-                      <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">English translation</label>
-                      <input type="text" placeholder="e.g. to miss someone" value={manualEnglish} onChange={(e) => setManualEnglish(e.target.value)} class="w-full px-3 py-2 text-xs bg-japandi-cream border rounded-lg focus:outline-none min-h-[38px]" />
-                    </div>
-                    <div class="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
-                      <div class="flex-grow">
-                        <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">Context [notes]</label>
-                        <input type="text" placeholder="e.g. Used mostly in Spain" value={manualContext} onChange={(e) => setManualContext(e.target.value)} class="w-full px-3 py-2 text-xs bg-japandi-cream border rounded-lg focus:outline-none min-h-[38px]" />
+                
+                {/* Upper Operation Row: Add Form & Native JSON File Sync Hub */}
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+                  
+                  {/* Manual Single Entry Addition Block */}
+                  <div class="lg:col-span-2 bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs flex flex-col justify-between">
+                    <form onSubmit={handleManualAdd} class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">Spanish phrase</label>
+                        <input type="text" placeholder="e.g. echar de menos" value={manualSpanish} onChange={(e) => setManualSpanish(e.target.value)} class="w-full px-3 py-2 text-xs bg-japandi-cream border rounded-lg focus:outline-none min-h-[38px]" />
                       </div>
-                      <button type="submit" class="px-4 py-2 bg-japandi-olive text-white text-[11px] uppercase tracking-wider font-bold rounded-lg min-h-[38px]">Add</button>
+                      <div>
+                        <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">English translation</label>
+                        <input type="text" placeholder="e.g. to miss someone" value={manualEnglish} onChange={(e) => setManualEnglish(e.target.value)} class="w-full px-3 py-2 text-xs bg-japandi-cream border rounded-lg focus:outline-none min-h-[38px]" />
+                      </div>
+                      <div class="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
+                        <div class="flex-grow">
+                          <label class="block text-[9px] uppercase tracking-wider font-extrabold text-japandi-muted mb-1">Context [notes]</label>
+                          <input type="text" placeholder="e.g. Used mostly in Spain" value={manualContext} onChange={(e) => setManualContext(e.target.value)} class="w-full px-3 py-2 text-xs bg-japandi-cream border rounded-lg focus:outline-none min-h-[38px]" />
+                        </div>
+                        <button type="submit" class="px-4 py-2 bg-japandi-olive text-white text-[11px] uppercase tracking-wider font-bold rounded-lg min-h-[38px]">Add</button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Native JSON Backup Data Hub */}
+                  <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs flex flex-col justify-between gap-3">
+                    <div>
+                      <h4 class="text-[10px] font-extrabold uppercase tracking-wider text-japandi-muted mb-1">Native Backup & File Hub</h4>
+                      <p class="text-[11px] text-japandi-muted leading-tight">Export your collection or restore database files directly.</p>
                     </div>
-                  </form>
+
+                    <div class="flex flex-col sm:flex-row lg:flex-col gap-2 w-full">
+                      <button 
+                        onClick={handleExportJSON}
+                        class="flex-1 py-2 px-3 border border-japandi-border bg-japandi-paper hover:bg-japandi-border text-japandi-charcoal text-xs font-bold rounded-lg transition duration-150 flex items-center justify-center gap-2 min-h-[36px]"
+                      >
+                        📤 Export Backup (.json)
+                      </button>
+
+                      <label class="flex-1 py-2 px-3 bg-japandi-olive hover:bg-japandi-oliveHover text-white text-xs font-bold rounded-lg cursor-pointer transition duration-150 flex items-center justify-center gap-2 text-center min-h-[36px]">
+                        📥 Import Backup
+                        <input 
+                          type="file" 
+                          ref={fileInputRef}
+                          accept=".json" 
+                          onChange={handleImportJSON} 
+                          class="hidden" 
+                        />
+                      </label>
+                    </div>
+                  </div>
+
                 </div>
 
+                {/* Database Filtration Layout Controls */}
                 <div class="bg-white border border-japandi-border rounded-2xl p-4 md:p-6 shadow-2xs">
                   <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
@@ -927,6 +1034,7 @@
                   </div>
                 </div>
 
+                {/* Main Tabular View Grid */}
                 <div class="bg-white border border-japandi-border rounded-2xl overflow-hidden shadow-2xs">
                   {filteredCards.length > 0 ? (
                     <div class="overflow-x-auto">
@@ -1029,7 +1137,7 @@
           </main>
 
           <footer class="mt-12 pt-5 border-t border-japandi-border text-center text-[11px] text-japandi-muted">
-            <p>© 2026 Satori Lingo Workspace. Silent PWA Leitner Box Mode.</p>
+            <p>© 2026 Satori Lingo Workspace. Silent PWA Leitner Box Mode with Data Portability Engine.</p>
           </footer>
         </div>
       );
@@ -1039,7 +1147,6 @@
     const root = ReactDOM.createRoot(container);
     root.render(<App />);
 
-    // --- Progressive Web App Service Worker Registration Lifecycle ---
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
