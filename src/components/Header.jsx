@@ -9,7 +9,7 @@ export const Header = ({ flashcardsCount, dueCardsCount }) => (
           Satori Lingo <span className="italic text-japandi-terracotta font-serif">悟り</span>
             </h1>
             <p className="text-xs text-japandi-muted mt-2 max-w-md">
-          A minimal Japanese-Scandinavian workspace focusing purely on visual recall and the classic Leitner Box system.
+          A workspace focusing purely on visual recall and the classic Leitner Box system.
             </p>
         </div>
 
