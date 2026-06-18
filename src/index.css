@@ -1,0 +1,78 @@
+@import 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..700;1,400..700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    body {
+        @apply bg-japandi-cream text-japandi-charcoal min-h-screen;
+    }
+}
+
+@layer utilities {
+    .serif-font {
+        font-family: 'Playfair Display', serif;
+    }
+
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: #F5F3EF;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: #C28C7E;
+        border-radius: 3px;
+    }
+
+    .animate-float {
+        animation: float 4s ease-in-out infinite;
+    }
+
+    .animate-pulse-ring {
+        animation: pulseRing 3s ease-in-out infinite;
+        transform-origin: center;
+    }
+
+    .animate-spin-slow {
+        animation: spin 10s linear infinite;
+    }
+
+    .animate-sway {
+        animation: sway 6s ease-in-out infinite;
+        transform-origin: center;
+    }
+
+    .animate-sway-heavy {
+        animation: swayHeavy 5s ease-in-out infinite;
+    }
+
+    @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-12px); }
+    }
+
+    @keyframes pulseRing {
+        0%, 100% { transform: scale(0.94); opacity: 0.7; }
+        50% { transform: scale(1.06); opacity: 1; }
+    }
+
+    @keyframes sway {
+        0%, 100% { transform: rotate(-2deg) translateY(0); }
+        50% { transform: rotate(2deg) translateY(-2px); }
+    }
+
+    @keyframes swayHeavy {
+        0%, 100% { transform: translate(0, 0) rotate(0deg); }
+        50% { transform: translate(-3px, -3px) rotate(8deg); }
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+}

@@ -1,0 +1,39 @@
+{
+  "short_name": "SatoriLingo",
+  "name": "Satori Lingo — Spaced Repetition Workspace",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgZmlsbD0iIzRGNUQ0RSIgcng9IjI0Ii8+PGNpcmNsZSBjeD0iOTYiIGN5PSI5NiIgcj0iNDAiIGZpbGw9IiNDMjhDN0UiLz48L3N2Zz4=",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzRGNUQ0RSIgcng9IjY0Ii8+PGNpcmNsZSBjeD0iMjU2IiBjeT0iMjU2IiByPSIxMDQiIGZpbGw9IiNDMjhDN0UiLz48L3N2Zz4=",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#FAF9F6",
+  "theme_color": "#4F5D4E",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjgwIiBoZWlnaHQ9IjcyMCIgdmlld0JveD0iMCAwIDEyODAgNzIwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjRjVGM0VGIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzZXJpZiIgZm9udC1zaXplPSI0OCIgZmlsbD0iIzJEMkQyRCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+U2F0b3JpIExpbmdvIERlc2t0b3AgV29ya3NwYWNlPC90ZXh0Pjwvc3ZnPg==",
+      "sizes": "1280x720",
+      "type": "image/svg+xml",
+      "form_factor": "wide",
+      "label": "Satori Lingo Desktop Workspace"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MjAiIGhlaWdodD0iMTI4MCIgdmlld0JveD0iMCAwIDcyMCAxMjgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjRjVGM0VGIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzZXJpZiIgZm9udC1zaXplPSIzNiIgZmlsbD0iIzJEMkQyRCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+U2F0b3JpIExpbmdvIE1vYmlsZSBSZXZpZXc8L3RleHQ+PC9zdmc+",
+      "sizes": "720x1280",
+      "type": "image/svg+xml",
+      "form_factor": "narrow",
+      "label": "Satori Lingo Mobile Review"
+    }
+  ]
+}
